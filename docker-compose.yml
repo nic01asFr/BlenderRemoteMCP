@@ -1,0 +1,80 @@
+version: '3.8'
+
+# =============================================================================
+# Blender MCP Server - Docker Compose Configuration
+# =============================================================================
+#
+# Usage:
+#   docker-compose up -d --build    # Build and start all services
+#   docker-compose down -v          # Stop and cleanup
+#   docker-compose logs -f mcp      # View MCP logs
+#   docker-compose restart mcp      # Restart MCP server only
+#
+# Endpoints:
+#   - MCP Server: http://localhost:8100/mcp
+#   - API Docs: http://localhost:8100/docs
+#   - Health: http://localhost:8100/health
+
+services:
+  # ==========================================================================
+  # MCP Server - Main entry point with container management
+  # ==========================================================================
+  mcp:
+    build:
+      context: .
+      dockerfile: docker/api/Dockerfile
+    container_name: blender-mcp-server
+    ports:
+      - "8100:8000"
+    environment:
+      - PORT=8000
+      - JWT_SECRET=${JWT_SECRET:-blender-mcp-secret-key-2024}
+      - LOG_LEVEL=info
+      - PYTHONUNBUFFERED=1
+    volumes:
+      # Docker socket for container management (Windows: npipe, Linux: socket)
+      - //var/run/docker.sock:/var/run/docker.sock
+      # Auth data persistence
+      - ./data:/app/data
+      # Development: mount source files for hot-reload on restart
+      - ./main_mcp.py:/app/main_mcp.py:ro
+      - ./src:/app/src:ro
+    networks:
+      - blender-net
+    depends_on:
+      blender-base:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ==========================================================================
+  # Blender Base Image Builder (one-time build)
+  # ==========================================================================
+  blender-base:
+    build:
+      context: ./docker/blender-canvas
+      dockerfile: Dockerfile
+    image: blender-canvas:latest
+    container_name: blender-base-builder
+    ports:
+      - "6080:6080"  # noVNC web interface (browser VNC access)
+      - "8080:8080"  # HTTP API for Blender control
+      - "8081:8081"  # MJPEG video stream
+    networks:
+      - blender-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
+
+networks:
+  blender-net:
+    driver: bridge
+    name: blender-net

@@ -1,0 +1,31 @@
+# Core - let pip resolve compatible versions
+fastapi>=0.115.12
+uvicorn[standard]
+pydantic[email]>=2.7.0
+httpx>=0.28.1
+
+# MCP
+fastmcp>=2.0.0
+
+# Utilities
+psutil
+python-multipart
+jinja2
+aiofiles
+websockets>=15.0.1
+
+# Authentication
+pyjwt
+
+# Docker management
+docker>=7.0.0
+
+# Database (for production)
+asyncpg
+sqlalchemy[asyncio]
+
+# Object storage
+minio
+
+# Anthropic Claude API
+anthropic

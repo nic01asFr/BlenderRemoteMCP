@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blender Canvas</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --bg-primary: #1a1a2e;
+            --bg-secondary: #16213e;
+            --text-primary: #ffffff;
+            --text-secondary: #a0a0a0;
+            --accent: #e94560;
+            --border: #2a2a4a;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Header */
+        header {
+            padding: 12px 24px;
+            background: var(--bg-secondary);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 20px;
+            font-weight: 600;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .api-key-box {
+            background: var(--bg-primary);
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-family: monospace;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .api-key-box code {
+            color: var(--accent);
+        }
+
+        .copy-btn {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            padding: 4px;
+        }
+
+        .copy-btn:hover { color: var(--text-primary); }
+
+        .logout-btn {
+            padding: 8px 16px;
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            border-radius: 6px;
+            cursor: pointer;
+        }
+
+        .logout-btn:hover { border-color: var(--accent); }
+
+        /* Main Canvas */
+        main {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #000;
+            position: relative;
+        }
+
+        .canvas-stream {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
+
+        .placeholder {
+            text-align: center;
+            color: var(--text-secondary);
+        }
+
+        .placeholder h2 { margin-bottom: 16px; }
+
+        .start-btn {
+            padding: 16px 48px;
+            font-size: 18px;
+            background: var(--accent);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            cursor: pointer;
+            margin-top: 24px;
+        }
+
+        .start-btn:hover { background: #ff6b6b; }
+
+        .loading {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .spinner {
+            width: 48px;
+            height: 48px;
+            border: 4px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Footer Status */
+        footer {
+            padding: 8px 24px;
+            background: var(--bg-secondary);
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            color: var(--text-secondary);
+            border-top: 1px solid var(--border);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 6px;
+        }
+
+        .status-dot.connected { background: #4caf50; }
+        .status-dot.disconnected { background: #f44336; }
+        .status-dot.starting { background: #ff9800; animation: pulse 1s infinite; }
+
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+        /* Login Overlay */
+        .login-overlay {
+            position: fixed;
+            inset: 0;
+            background: var(--bg-primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+        }
+
+        .login-box {
+            background: var(--bg-secondary);
+            padding: 40px;
+            border-radius: 16px;
+            width: 100%;
+            max-width: 400px;
+        }
+
+        .login-box h2 { text-align: center; margin-bottom: 32px; }
+
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; margin-bottom: 8px; }
+
+        .form-group input {
+            width: 100%;
+            padding: 12px 16px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-size: 14px;
+        }
+
+        .form-group input:focus { outline: none; border-color: var(--accent); }
+
+        .submit-btn {
+            width: 100%;
+            padding: 14px;
+            background: var(--accent);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-size: 16px;
+            cursor: pointer;
+        }
+
+        .toggle-form {
+            text-align: center;
+            margin-top: 20px;
+            color: var(--text-secondary);
+        }
+
+        .toggle-form a { color: var(--accent); cursor: pointer; }
+
+        .error { color: #f44336; text-align: center; margin-top: 16px; }
+
+        /* MCP Info Panel */
+        .mcp-info {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(22, 33, 62, 0.95);
+            padding: 20px;
+            border-radius: 12px;
+            max-width: 350px;
+            border: 1px solid var(--border);
+        }
+
+        .mcp-info h3 { margin-bottom: 12px; font-size: 14px; }
+
+        .mcp-info pre {
+            background: var(--bg-primary);
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 11px;
+            overflow-x: auto;
+            margin-bottom: 12px;
+        }
+
+        .mcp-info .hint {
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+
+        .close-info {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 18px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Login Overlay -->
+    <div class="login-overlay" id="loginOverlay">
+        <form class="login-box" id="loginForm">
+            <h2 id="formTitle">Blender Canvas</h2>
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="emailInput" required>
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="passwordInput" required>
+            </div>
+            <button type="submit" class="submit-btn" id="submitBtn">Login</button>
+            <div class="toggle-form">
+                <span id="toggleText">No account?</span>
+                <a id="toggleLink">Register</a>
+            </div>
+            <div class="error" id="errorMsg"></div>
+        </form>
+    </div>
+
+    <!-- Main App -->
+    <div id="mainApp" style="display: none; flex-direction: column; height: 100vh;">
+        <header>
+            <div class="logo">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="#e94560">
+                    <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+                </svg>
+                Blender Canvas
+            </div>
+            <div class="user-info">
+                <div class="api-key-box">
+                    API Key: <code id="apiKeyDisplay">•••••••</code>
+                    <button class="copy-btn" id="copyApiKey" title="Copy API Key">📋</button>
+                </div>
+                <button class="logout-btn" id="logoutBtn">Logout</button>
+            </div>
+        </header>
+
+        <main id="canvasArea">
+            <div class="placeholder" id="placeholder">
+                <h2>Your Blender Canvas</h2>
+                <p>Start a session to see your Blender instance</p>
+                <button class="start-btn" id="startBtn">Start Session</button>
+            </div>
+
+            <div class="loading" id="loading" style="display: none;">
+                <div class="spinner"></div>
+                <div>Starting Blender...</div>
+            </div>
+
+            <img class="canvas-stream" id="stream" style="display: none;">
+
+            <!-- MCP Connection Info -->
+            <div class="mcp-info" id="mcpInfo" style="display: none;">
+                <button class="close-info" id="closeInfo">&times;</button>
+                <h3>Connect your MCP Client</h3>
+                <pre id="mcpConfig">{
+  "mcpServers": {
+    "blender": {
+      "url": "http://localhost:8000/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_API_KEY"
+      }
+    }
+  }
+}</pre>
+                <div class="hint">
+                    Add to Claude Desktop config, then ask:<br>
+                    <em>"Create a red cube"</em>
+                </div>
+            </div>
+        </main>
+
+        <footer>
+            <div>
+                <span class="status-dot" id="statusDot"></span>
+                <span id="statusText">Disconnected</span>
+            </div>
+            <div>Session: <span id="sessionId">-</span></div>
+            <div>Stream: <span id="streamInfo">-</span></div>
+        </footer>
+    </div>
+
+    <script>
+        // State
+        let token = localStorage.getItem('token');
+        let apiKey = localStorage.getItem('apiKey');
+        let isRegister = false;
+
+        // Elements
+        const loginOverlay = document.getElementById('loginOverlay');
+        const mainApp = document.getElementById('mainApp');
+        const loginForm = document.getElementById('loginForm');
+        const formTitle = document.getElementById('formTitle');
+        const toggleText = document.getElementById('toggleText');
+        const toggleLink = document.getElementById('toggleLink');
+        const submitBtn = document.getElementById('submitBtn');
+        const errorMsg = document.getElementById('errorMsg');
+        const placeholder = document.getElementById('placeholder');
+        const loading = document.getElementById('loading');
+        const stream = document.getElementById('stream');
+        const mcpInfo = document.getElementById('mcpInfo');
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+        const sessionId = document.getElementById('sessionId');
+        const streamInfo = document.getElementById('streamInfo');
+
+        // Check auth
+        if (token && apiKey) {
+            showApp();
+        }
+
+        // Toggle login/register
+        toggleLink.onclick = () => {
+            isRegister = !isRegister;
+            formTitle.textContent = isRegister ? 'Create Account' : 'Blender Canvas';
+            submitBtn.textContent = isRegister ? 'Register' : 'Login';
+            toggleText.textContent = isRegister ? 'Have an account?' : 'No account?';
+            toggleLink.textContent = isRegister ? 'Login' : 'Register';
+            errorMsg.textContent = '';
+        };
+
+        // Form submit
+        loginForm.onsubmit = async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('emailInput').value;
+            const password = document.getElementById('passwordInput').value;
+
+            try {
+                const res = await fetch(isRegister ? '/api/auth/register' : '/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail);
+
+                token = data.access_token;
+                apiKey = data.api_key;
+                localStorage.setItem('token', token);
+                localStorage.setItem('apiKey', apiKey);
+                showApp();
+            } catch (err) {
+                errorMsg.textContent = err.message;
+            }
+        };
+
+        function showApp() {
+            loginOverlay.style.display = 'none';
+            mainApp.style.display = 'flex';
+            document.getElementById('apiKeyDisplay').textContent = apiKey.substring(0, 12) + '...';
+            updateMcpConfig();
+            checkSession();
+        }
+
+        function updateMcpConfig() {
+            const host = window.location.origin;
+            document.getElementById('mcpConfig').textContent = JSON.stringify({
+                mcpServers: {
+                    blender: {
+                        url: `${host}/mcp`,
+                        headers: { "Authorization": `Bearer ${apiKey}` }
+                    }
+                }
+            }, null, 2);
+        }
+
+        // Copy API key
+        document.getElementById('copyApiKey').onclick = () => {
+            navigator.clipboard.writeText(apiKey);
+            document.getElementById('copyApiKey').textContent = '✓';
+            setTimeout(() => document.getElementById('copyApiKey').textContent = '📋', 2000);
+        };
+
+        // Logout
+        document.getElementById('logoutBtn').onclick = () => {
+            localStorage.clear();
+            location.reload();
+        };
+
+        // Close MCP info
+        document.getElementById('closeInfo').onclick = () => {
+            mcpInfo.style.display = 'none';
+        };
+
+        // Check session
+        async function checkSession() {
+            try {
+                const res = await fetch('/api/session', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (res.ok) {
+                    const session = await res.json();
+                    if (session.status === 'ready') {
+                        showStream(session);
+                    } else {
+                        setStatus('starting', session.status);
+                        sessionId.textContent = session.session_id.substring(0, 8);
+                        setTimeout(checkSession, 2000);
+                    }
+                } else {
+                    setStatus('disconnected', 'No session');
+                }
+            } catch (err) {
+                setStatus('disconnected', 'Error');
+            }
+        }
+
+        // Start session
+        document.getElementById('startBtn').onclick = async () => {
+            placeholder.style.display = 'none';
+            loading.style.display = 'flex';
+            setStatus('starting', 'Starting...');
+
+            try {
+                const res = await fetch('/api/session/start', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (!res.ok) throw new Error('Failed to start');
+
+                const session = await res.json();
+                sessionId.textContent = session.session_id.substring(0, 8);
+                pollSession();
+            } catch (err) {
+                loading.style.display = 'none';
+                placeholder.style.display = 'block';
+                setStatus('disconnected', 'Failed');
+            }
+        };
+
+        async function pollSession() {
+            const res = await fetch('/api/session', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (res.ok) {
+                const session = await res.json();
+                if (session.status === 'ready') {
+                    showStream(session);
+                } else {
+                    setTimeout(pollSession, 1500);
+                }
+            }
+        }
+
+        function showStream(session) {
+            loading.style.display = 'none';
+            placeholder.style.display = 'none';
+            stream.style.display = 'block';
+            stream.src = `/stream?t=${Date.now()}`;
+            mcpInfo.style.display = 'block';
+            setStatus('connected', 'Connected');
+            sessionId.textContent = session.session_id.substring(0, 8);
+            streamInfo.textContent = 'MJPEG Live';
+        }
+
+        function setStatus(state, text) {
+            statusDot.className = 'status-dot ' + state;
+            statusText.textContent = text;
+        }
+    </script>
+</body>
+</html>
