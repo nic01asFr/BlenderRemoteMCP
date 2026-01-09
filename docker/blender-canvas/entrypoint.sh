@@ -3,6 +3,11 @@ set -e
 
 echo "Starting Blender Canvas Container..."
 
+# Clean up stale X11 lock files (important for container restarts)
+echo "Cleaning up stale X11 locks..."
+rm -f /tmp/.X99-lock
+rm -f /tmp/.X11-unix/X99
+
 # Start Xvfb (virtual display)
 echo "Starting Xvfb on display :99..."
 Xvfb :99 -screen 0 1920x1080x24 -ac &

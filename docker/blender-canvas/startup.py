@@ -36,6 +36,21 @@ def configure_blender():
     except Exception:
         pass  # Ignore viewport errors in headless mode
 
+    # Configure input for web canvas (laptop-friendly controls)
+    try:
+        prefs = bpy.context.preferences.inputs
+        # Enable 3-button mouse emulation: Alt+LMB = Middle Mouse Button
+        prefs.use_mouse_emulate_3_button = True
+        # Enable continuous grab for smoother orbit/pan
+        prefs.use_mouse_continuous = True
+        # Zoom to mouse cursor position (more intuitive)
+        prefs.use_zoom_to_mouse = True
+        # Enable drag immediately for faster response
+        prefs.use_drag_immediately = True
+        print("Input configured: 3-button emulation enabled (Alt+LMB = MMB)")
+    except Exception as e:
+        print(f"Input config warning: {e}")
+
     print("Blender configured for MCP operation")
 
 # Run on startup with error handling

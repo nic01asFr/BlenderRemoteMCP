@@ -1,0 +1,16 @@
+# Fluxbox window rules
+# Remove decorations and maximize Blender window
+
+[app] (name=blender)
+  [Deco] {NONE}
+  [Maximized] {yes}
+  [Layer] {4}
+  [Sticky] {yes}
+[end]
+
+[app] (name=Blender)
+  [Deco] {NONE}
+  [Maximized] {yes}
+  [Layer] {4}
+  [Sticky] {yes}
+[end]

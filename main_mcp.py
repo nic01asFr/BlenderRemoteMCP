@@ -25,10 +25,10 @@ Test:  Configure Claude Desktop and ask "Create a red cube"
 
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
+from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
@@ -37,6 +37,7 @@ import httpx
 import logging
 import os
 import asyncio
+import websockets
 
 from src.container_manager import ContainerManager
 from src.auth import AuthManager, UserCreate, UserLogin, TokenResponse
@@ -1687,6 +1688,375 @@ async def stream(user_id: str):
         generate(),
         media_type="multipart/x-mixed-replace; boundary=frame"
     )
+
+
+# =============================================================================
+# WEBSOCKET VNC PROXY
+# =============================================================================
+
+@app.websocket("/ws/{user_id}")
+async def vnc_websocket_proxy(websocket: WebSocket, user_id: str):
+    """
+    WebSocket proxy to user's VNC server (via websockify).
+    Enables direct browser connection to Blender viewport.
+    """
+    # Verify user has active session
+    session = container_manager.get_session(user_id)
+    if not session:
+        await websocket.close(code=4004)
+        return
+
+    await websocket.accept()
+
+    # Connect to container's websockify (noVNC WebSocket bridge)
+    # websockify runs on port 6080 inside container, mapped to novnc_port
+    # Use host_address (host.docker.internal) when running in Docker
+    vnc_ws_url = f"ws://{container_manager.host_address}:{session.novnc_port}/websockify"
+
+    try:
+        async with websockets.connect(
+            vnc_ws_url,
+            subprotocols=["binary"],
+            max_size=None,
+            ping_interval=None
+        ) as vnc_ws:
+
+            async def client_to_vnc():
+                """Forward messages from browser to VNC"""
+                try:
+                    while True:
+                        data = await websocket.receive_bytes()
+                        await vnc_ws.send(data)
+                except WebSocketDisconnect:
+                    pass
+                except Exception as e:
+                    logger.debug(f"Client->VNC ended: {e}")
+
+            async def vnc_to_client():
+                """Forward messages from VNC to browser"""
+                try:
+                    async for data in vnc_ws:
+                        if isinstance(data, bytes):
+                            await websocket.send_bytes(data)
+                        else:
+                            await websocket.send_text(data)
+                except Exception as e:
+                    logger.debug(f"VNC->Client ended: {e}")
+
+            # Run both directions concurrently
+            await asyncio.gather(
+                client_to_vnc(),
+                vnc_to_client(),
+                return_exceptions=True
+            )
+
+    except websockets.exceptions.InvalidStatusCode as e:
+        logger.error(f"VNC WebSocket connection failed: {e}")
+    except Exception as e:
+        logger.error(f"VNC proxy error: {e}")
+    finally:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+
+# =============================================================================
+# BLENDER CANVAS (Pure VNC Interface)
+# =============================================================================
+
+async def _get_user_from_token(token: str):
+    """Verify token and return user"""
+    if not token:
+        return None
+    # Handle both cookie and query param formats
+    if token.startswith("blender_"):
+        return await auth_manager.verify_api_key(token)
+    return None
+
+
+async def _get_user_from_request(request: Request):
+    """Extract and verify user from request (Authorization header or cookie)"""
+    # Try Authorization header first
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+        return await _get_user_from_token(token)
+
+    # Try cookie
+    token = request.cookies.get("blender_token")
+    if token:
+        return await _get_user_from_token(token)
+
+    # Try query param
+    token = request.query_params.get("token")
+    if token:
+        return await _get_user_from_token(token)
+
+    return None
+
+
+@app.get("/canvas", response_class=HTMLResponse)
+async def canvas_page(request: Request, token: str = None):
+    """
+    Pure Blender canvas page - full viewport, no chrome.
+    Auth via ?token= query param or blender_token cookie.
+    """
+    # Check token from query or cookie
+    auth_token = token or request.cookies.get("blender_token")
+
+    if not auth_token:
+        # Redirect to login or show error
+        return HTMLResponse("""
+        <html>
+        <head><title>Blender Canvas - Auth Required</title></head>
+        <body style="background:#1a1a1a;color:#fff;font-family:sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;">
+            <div style="text-align:center;">
+                <h1>Authentication Required</h1>
+                <p>Add your API key: <code>/canvas?token=blender_xxx</code></p>
+                <p>Or <a href="/" style="color:#4af;">go to home</a> to register.</p>
+            </div>
+        </body>
+        </html>
+        """, status_code=401)
+
+    user = await _get_user_from_token(auth_token)
+    if not user:
+        return HTMLResponse("""
+        <html>
+        <head><title>Blender Canvas - Invalid Token</title></head>
+        <body style="background:#1a1a1a;color:#fff;font-family:sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;">
+            <div style="text-align:center;">
+                <h1>Invalid Token</h1>
+                <p>Your API key is invalid or expired.</p>
+                <p><a href="/" style="color:#4af;">Go to home</a> to get a new one.</p>
+            </div>
+        </body>
+        </html>
+        """, status_code=401)
+
+    # Ensure user has a session
+    try:
+        session = await _ensure_session(user.id)
+    except Exception as e:
+        return HTMLResponse(f"""
+        <html>
+        <head><title>Blender Canvas - Error</title></head>
+        <body style="background:#1a1a1a;color:#fff;font-family:sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;">
+            <div style="text-align:center;">
+                <h1>Session Error</h1>
+                <p>Failed to start Blender: {e}</p>
+                <p><a href="/" style="color:#4af;">Try again</a></p>
+            </div>
+        </body>
+        </html>
+        """, status_code=500)
+
+    # Return pure canvas page
+    return templates.TemplateResponse("blender_canvas.html", {
+        "request": request,
+        "user_id": user.id,
+        "session": session.to_dict() if hasattr(session, 'to_dict') else {},
+        "token": auth_token
+    })
+
+
+@app.get("/api/session/info")
+async def session_info(request: Request, token: str = None):
+    """Get current session info (ports, URLs)"""
+    auth_token = token or request.headers.get("Authorization", "").replace("Bearer ", "")
+
+    user = await _get_user_from_token(auth_token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    session = container_manager.get_session(user.id)
+    if not session:
+        raise HTTPException(status_code=404, detail="No active session")
+
+    return session.to_dict()
+
+
+# =============================================================================
+# FILE MANAGEMENT API
+# =============================================================================
+
+@app.get("/api/files/list")
+async def list_user_files(request: Request):
+    """List files in user's project folder"""
+    user = await _get_user_from_request(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    session = container_manager.get_session(user.id)
+    if not session:
+        raise HTTPException(status_code=404, detail="No active session")
+
+    # Execute Python in Blender to list files
+    result = await _call_blender(user.id, "/api/execute", "POST", {
+        "code": """
+import os
+files = []
+projects_dir = '/projects'
+if os.path.exists(projects_dir):
+    for f in os.listdir(projects_dir):
+        path = os.path.join(projects_dir, f)
+        if os.path.isfile(path):
+            files.append({
+                'name': f,
+                'size': os.path.getsize(path),
+                'is_blend': f.endswith('.blend'),
+                'is_image': f.lower().endswith(('.png', '.jpg', '.jpeg', '.exr', '.hdr'))
+            })
+result = sorted(files, key=lambda x: x['name'])
+"""
+    })
+
+    return result.get("result", [])
+
+
+@app.post("/api/files/upload")
+async def upload_user_file(request: Request):
+    """Upload a file to user's project folder"""
+    from fastapi import UploadFile, File, Form
+    import base64
+
+    user = await _get_user_from_request(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    session = container_manager.get_session(user.id)
+    if not session:
+        raise HTTPException(status_code=404, detail="No active session")
+
+    # Parse multipart form data
+    form = await request.form()
+    file = form.get("file")
+    if not file:
+        raise HTTPException(status_code=400, detail="No file provided")
+
+    filename = file.filename
+    content = await file.read()
+
+    # Validate filename (security)
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    # Encode content as base64 and send to Blender
+    content_b64 = base64.b64encode(content).decode('utf-8')
+
+    result = await _call_blender(user.id, "/api/execute", "POST", {
+        "code": f"""
+import os
+import base64
+
+filename = {repr(filename)}
+content_b64 = {repr(content_b64)}
+content = base64.b64decode(content_b64)
+
+filepath = os.path.join('/projects', filename)
+with open(filepath, 'wb') as f:
+    f.write(content)
+
+result = {{'success': True, 'filename': filename, 'size': len(content)}}
+"""
+    })
+
+    return result.get("result", {"success": False})
+
+
+@app.get("/api/files/download/{filename}")
+async def download_user_file(request: Request, filename: str):
+    """Download a file from user's project folder"""
+    import base64
+
+    user = await _get_user_from_request(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    session = container_manager.get_session(user.id)
+    if not session:
+        raise HTTPException(status_code=404, detail="No active session")
+
+    # Validate filename (security)
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    # Get file content from Blender
+    result = await _call_blender(user.id, "/api/execute", "POST", {
+        "code": f"""
+import os
+import base64
+
+filename = {repr(filename)}
+filepath = os.path.join('/projects', filename)
+
+if os.path.exists(filepath):
+    with open(filepath, 'rb') as f:
+        content = f.read()
+    result = {{'success': True, 'content': base64.b64encode(content).decode('utf-8'), 'filename': filename}}
+else:
+    result = {{'success': False, 'error': 'File not found'}}
+"""
+    })
+
+    file_result = result.get("result", {})
+    if not file_result.get("success"):
+        raise HTTPException(status_code=404, detail=file_result.get("error", "File not found"))
+
+    content = base64.b64decode(file_result["content"])
+
+    # Determine content type
+    content_type = "application/octet-stream"
+    if filename.endswith(".blend"):
+        content_type = "application/x-blender"
+    elif filename.endswith(".png"):
+        content_type = "image/png"
+    elif filename.endswith((".jpg", ".jpeg")):
+        content_type = "image/jpeg"
+
+    return Response(
+        content=content,
+        media_type=content_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
+
+
+@app.delete("/api/files/{filename}")
+async def delete_user_file(request: Request, filename: str):
+    """Delete a file from user's project folder"""
+    user = await _get_user_from_request(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    session = container_manager.get_session(user.id)
+    if not session:
+        raise HTTPException(status_code=404, detail="No active session")
+
+    # Validate filename (security)
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    result = await _call_blender(user.id, "/api/execute", "POST", {
+        "code": f"""
+import os
+
+filename = {repr(filename)}
+filepath = os.path.join('/projects', filename)
+
+if os.path.exists(filepath):
+    os.remove(filepath)
+    result = {{'success': True, 'deleted': filename}}
+else:
+    result = {{'success': False, 'error': 'File not found'}}
+"""
+    })
+
+    file_result = result.get("result", {})
+    if not file_result.get("success"):
+        raise HTTPException(status_code=404, detail=file_result.get("error", "File not found"))
+
+    return file_result
 
 
 # =============================================================================

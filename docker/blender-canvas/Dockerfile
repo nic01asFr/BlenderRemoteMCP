@@ -79,6 +79,10 @@ RUN chmod +x /app/entrypoint.sh
 RUN mkdir -p /root/.config/blender/4.0/scripts/startup && \
     cp /app/startup.py /root/.config/blender/4.0/scripts/startup/
 
+# Configure Fluxbox to remove window decorations for Blender
+RUN mkdir -p /root/.fluxbox
+COPY fluxbox-apps /root/.fluxbox/apps
+
 # Expose ports
 # 6080: noVNC web interface (browser VNC client)
 # 8080: HTTP API for Blender control

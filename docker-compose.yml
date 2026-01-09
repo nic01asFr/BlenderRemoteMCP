@@ -39,6 +39,9 @@ services:
       # Development: mount source files for hot-reload on restart
       - ./main_mcp.py:/app/main_mcp.py:ro
       - ./src:/app/src:ro
+      # Static files and templates for web UI
+      - ./static:/app/static:ro
+      - ./templates:/app/templates:ro
     networks:
       - blender-net
     depends_on:

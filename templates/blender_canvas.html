@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Blender Canvas</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #1a1a1a;
+        }
+
+        /* Canvas container - full viewport */
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #0d0d0d;
+        }
+
+        /* Loading overlay */
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: #fff;
+            z-index: 100;
+        }
+
+        .spinner {
+            width: 48px;
+            height: 48px;
+            border: 4px solid #333;
+            border-top-color: #e94560;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 16px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        #loading-text {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-size: 16px;
+            color: #888;
+        }
+
+        /* Floating control panel */
+        #controls {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 1000;
+            display: none;
+            gap: 8px;
+        }
+
+        #controls button {
+            padding: 12px 16px;
+            background: rgba(30, 30, 30, 0.9);
+            color: #fff;
+            border: 1px solid #444;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            transition: all 0.2s;
+            backdrop-filter: blur(10px);
+        }
+
+        #controls button:hover {
+            background: rgba(50, 50, 50, 0.95);
+            border-color: #e94560;
+        }
+
+        #controls button.active {
+            background: #e94560;
+            border-color: #e94560;
+        }
+
+        /* Fullscreen hint */
+        #fullscreen-hint {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.85);
+            color: #fff;
+            padding: 24px 40px;
+            border-radius: 12px;
+            text-align: center;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            z-index: 200;
+            display: none;
+            backdrop-filter: blur(10px);
+            border: 1px solid #333;
+        }
+
+        #fullscreen-hint h3 {
+            margin-bottom: 12px;
+            font-size: 18px;
+        }
+
+        #fullscreen-hint p {
+            color: #888;
+            font-size: 14px;
+            margin-bottom: 16px;
+        }
+
+        #fullscreen-hint button {
+            padding: 12px 32px;
+            background: #e94560;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        #fullscreen-hint button:hover {
+            background: #ff6b6b;
+        }
+
+        /* Keyboard shortcuts overlay */
+        #shortcuts-panel {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.85);
+            color: #fff;
+            padding: 16px 20px;
+            border-radius: 12px;
+            font-family: monospace;
+            font-size: 12px;
+            z-index: 150;
+            display: none;
+            max-width: 300px;
+            backdrop-filter: blur(10px);
+            border: 1px solid #333;
+        }
+
+        #shortcuts-panel h4 {
+            margin-bottom: 12px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-size: 14px;
+            color: #e94560;
+        }
+
+        #shortcuts-panel .shortcut {
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 0;
+            border-bottom: 1px solid #333;
+        }
+
+        #shortcuts-panel .key {
+            background: #333;
+            padding: 2px 6px;
+            border-radius: 4px;
+            color: #e94560;
+        }
+
+        /* Error state */
+        #error {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: #fff;
+            z-index: 100;
+            display: none;
+        }
+
+        #error h3 {
+            color: #e94560;
+            margin-bottom: 12px;
+            font-size: 20px;
+        }
+
+        #error p {
+            color: #888;
+            margin-bottom: 20px;
+        }
+
+        #error button {
+            padding: 12px 24px;
+            background: #e94560;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        /* Mini status indicator */
+        #status-indicator {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            z-index: 1000;
+            transition: background 0.3s;
+        }
+
+        #status-indicator.connected { background: #4caf50; }
+        #status-indicator.connecting { background: #ff9800; animation: pulse 1s infinite; }
+        #status-indicator.disconnected { background: #f44336; }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Status indicator -->
+    <div id="status-indicator" class="connecting"></div>
+
+    <!-- Loading state -->
+    <div id="loading">
+        <div class="spinner"></div>
+        <div id="loading-text">Connecting to Blender...</div>
+    </div>
+
+    <!-- Error state -->
+    <div id="error">
+        <h3>Connection Lost</h3>
+        <p id="error-msg">Unable to connect to Blender session.</p>
+        <button onclick="reconnect()">Reconnect</button>
+    </div>
+
+    <!-- Fullscreen hint (shown on first connection) -->
+    <div id="fullscreen-hint">
+        <h3>Enter Fullscreen Mode</h3>
+        <p>For the best experience with all keyboard shortcuts</p>
+        <button onclick="enterFullscreen()">Go Fullscreen</button>
+    </div>
+
+    <!-- Canvas container for noVNC -->
+    <div id="canvas-container"></div>
+
+    <!-- Floating controls (visible on hover near edge) -->
+    <div id="controls">
+        <button onclick="toggleFullscreen()" id="btn-fullscreen" title="Toggle Fullscreen (F11)">
+            <span id="fullscreen-icon">&#x26F6;</span> Fullscreen
+        </button>
+        <button onclick="showShortcuts()" title="Keyboard Shortcuts">? Help</button>
+        <button onclick="exitToMenu()" title="Back to Dashboard">Exit</button>
+    </div>
+
+    <!-- Keyboard shortcuts panel -->
+    <div id="shortcuts-panel">
+        <h4>Blender Shortcuts</h4>
+        <div class="shortcut"><span>Orbit View</span><span class="key">MMB</span> or <span class="key">Alt+LMB</span></div>
+        <div class="shortcut"><span>Pan View</span><span class="key">Shift+MMB</span></div>
+        <div class="shortcut"><span>Zoom</span><span class="key">Scroll</span></div>
+        <div class="shortcut"><span>Select</span><span class="key">LMB</span></div>
+        <div class="shortcut"><span>Move</span><span class="key">G</span></div>
+        <div class="shortcut"><span>Rotate</span><span class="key">R</span></div>
+        <div class="shortcut"><span>Scale</span><span class="key">S</span></div>
+        <div class="shortcut"><span>Delete</span><span class="key">X</span></div>
+        <div class="shortcut"><span>Undo</span><span class="key">Ctrl+Z</span></div>
+        <div class="shortcut"><span>Frame All</span><span class="key">Home</span></div>
+        <div class="shortcut"><span>Exit Fullscreen</span><span class="key">Esc (hold 2s)</span></div>
+        <p style="margin-top: 12px; color: #666; font-size: 11px;">Click anywhere to close</p>
+    </div>
+
+    <script type="module">
+        import RFB from '/static/novnc/core/rfb.js';
+
+        // Configuration from server
+        const userId = '{{ user_id }}';
+        const wsUrl = (window.location.protocol === 'https:' ? 'wss://' : 'ws://')
+                      + window.location.host + '/ws/' + userId;
+
+        // DOM elements
+        const container = document.getElementById('canvas-container');
+        const loading = document.getElementById('loading');
+        const loadingText = document.getElementById('loading-text');
+        const error = document.getElementById('error');
+        const errorMsg = document.getElementById('error-msg');
+        const controls = document.getElementById('controls');
+        const fullscreenHint = document.getElementById('fullscreen-hint');
+        const shortcutsPanel = document.getElementById('shortcuts-panel');
+        const statusIndicator = document.getElementById('status-indicator');
+
+        let rfb = null;
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 5;
+        let hasShownFullscreenHint = false;
+
+        // Connect to VNC via WebSocket proxy
+        async function connect() {
+            try {
+                loadingText.textContent = 'Connecting to Blender...';
+                loading.style.display = 'block';
+                error.style.display = 'none';
+                statusIndicator.className = 'connecting';
+
+                rfb = new RFB(container, wsUrl, {
+                    scaleViewport: true,
+                    resizeSession: true,
+                    focusOnClick: true,
+                    clipViewport: false,
+                    showDotCursor: false,
+                    qualityLevel: 6,
+                    compressionLevel: 2
+                });
+
+                // Connection established
+                rfb.addEventListener('connect', () => {
+                    console.log('Connected to VNC');
+                    loading.style.display = 'none';
+                    error.style.display = 'none';
+                    controls.style.display = 'flex';
+                    statusIndicator.className = 'connected';
+                    reconnectAttempts = 0;
+
+                    // Show fullscreen hint on first connection
+                    if (!hasShownFullscreenHint && !document.fullscreenElement) {
+                        setTimeout(() => {
+                            fullscreenHint.style.display = 'block';
+                            hasShownFullscreenHint = true;
+                        }, 1000);
+                    }
+
+                    // Focus the canvas
+                    rfb.focus();
+                });
+
+                // Connection lost
+                rfb.addEventListener('disconnect', (e) => {
+                    console.log('Disconnected from VNC', e.detail);
+                    statusIndicator.className = 'disconnected';
+
+                    if (e.detail.clean) {
+                        // Clean disconnect
+                        showError('Session ended');
+                    } else {
+                        // Unexpected disconnect - try to reconnect
+                        if (reconnectAttempts < maxReconnectAttempts) {
+                            reconnectAttempts++;
+                            loadingText.textContent = `Reconnecting (${reconnectAttempts}/${maxReconnectAttempts})...`;
+                            loading.style.display = 'block';
+                            controls.style.display = 'none';
+                            statusIndicator.className = 'connecting';
+                            setTimeout(connect, 2000);
+                        } else {
+                            showError('Connection lost. Please try again.');
+                        }
+                    }
+                });
+
+                // Security credentials (if VNC requires password)
+                rfb.addEventListener('credentialsrequired', () => {
+                    // Send empty password (our containers don't require auth)
+                    rfb.sendCredentials({ password: '' });
+                });
+
+                // Desktop name
+                rfb.addEventListener('desktopname', (e) => {
+                    console.log('Desktop name:', e.detail.name);
+                });
+
+            } catch (e) {
+                console.error('Connection error:', e);
+                showError('Failed to connect: ' + e.message);
+            }
+        }
+
+        function showError(message) {
+            loading.style.display = 'none';
+            error.style.display = 'block';
+            controls.style.display = 'none';
+            errorMsg.textContent = message;
+            statusIndicator.className = 'disconnected';
+        }
+
+        // Reconnect function (exposed to window)
+        window.reconnect = function() {
+            reconnectAttempts = 0;
+            connect();
+        };
+
+        // Fullscreen functions
+        window.enterFullscreen = async function() {
+            fullscreenHint.style.display = 'none';
+            try {
+                await document.documentElement.requestFullscreen();
+
+                // Request keyboard lock for all keys
+                if ('keyboard' in navigator && 'lock' in navigator.keyboard) {
+                    try {
+                        await navigator.keyboard.lock([
+                            'Escape', 'Tab', 'AltLeft', 'AltRight',
+                            'MetaLeft', 'MetaRight', 'ControlLeft', 'ControlRight'
+                        ]);
+                        console.log('Keyboard locked');
+                    } catch (e) {
+                        console.log('Keyboard lock not available:', e);
+                    }
+                }
+
+                if (rfb) rfb.focus();
+            } catch (e) {
+                console.error('Fullscreen error:', e);
+            }
+        };
+
+        window.toggleFullscreen = async function() {
+            if (!document.fullscreenElement) {
+                await enterFullscreen();
+            } else {
+                await document.exitFullscreen();
+            }
+        };
+
+        // Handle fullscreen changes
+        document.addEventListener('fullscreenchange', () => {
+            const btn = document.getElementById('btn-fullscreen');
+            if (document.fullscreenElement) {
+                btn.classList.add('active');
+                controls.style.display = 'none';
+            } else {
+                btn.classList.remove('active');
+                controls.style.display = 'flex';
+                // Release keyboard lock
+                if ('keyboard' in navigator && 'unlock' in navigator.keyboard) {
+                    navigator.keyboard.unlock();
+                }
+            }
+        });
+
+        // Show controls on mouse move near bottom-right
+        let controlsTimeout;
+        document.addEventListener('mousemove', (e) => {
+            if (document.fullscreenElement) {
+                const threshold = 100;
+                const nearEdge = (window.innerWidth - e.clientX < threshold) &&
+                                (window.innerHeight - e.clientY < threshold);
+
+                if (nearEdge) {
+                    controls.style.display = 'flex';
+                    clearTimeout(controlsTimeout);
+                    controlsTimeout = setTimeout(() => {
+                        if (document.fullscreenElement) {
+                            controls.style.display = 'none';
+                        }
+                    }, 3000);
+                }
+            }
+        });
+
+        // Shortcuts panel
+        window.showShortcuts = function() {
+            shortcutsPanel.style.display = shortcutsPanel.style.display === 'block' ? 'none' : 'block';
+        };
+
+        document.addEventListener('click', (e) => {
+            if (shortcutsPanel.style.display === 'block' && !shortcutsPanel.contains(e.target)) {
+                shortcutsPanel.style.display = 'none';
+            }
+        });
+
+        // Exit to menu
+        window.exitToMenu = function() {
+            if (document.fullscreenElement) {
+                document.exitFullscreen();
+            }
+            window.location.href = '/canvas.html';
+        };
+
+        // Handle keyboard shortcuts at document level (when not fullscreen)
+        document.addEventListener('keydown', (e) => {
+            // F11 - toggle fullscreen
+            if (e.key === 'F11') {
+                e.preventDefault();
+                toggleFullscreen();
+            }
+            // Escape to close shortcuts
+            if (e.key === 'Escape' && shortcutsPanel.style.display === 'block') {
+                shortcutsPanel.style.display = 'none';
+            }
+            // ? to show shortcuts
+            if (e.key === '?' && !document.fullscreenElement) {
+                showShortcuts();
+            }
+        });
+
+        // Prevent context menu on canvas
+        container.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+        });
+
+        // Start connection
+        connect();
+    </script>
+</body>
+</html>
