@@ -45,6 +45,13 @@ curl -X POST http://localhost:8100/mcp -H "Authorization: Bearer $KEY" \
   -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"create_object","arguments":{"type":"CUBE"}},"id":2}'
 ```
 
+```bash
+# Image tout-en-un (mode mono, forme deployable sur pod)
+docker build -t blender-canvas:latest docker/blender-canvas/
+docker build -t blender-remote-mcp:latest -f docker/all-in-one/Dockerfile .
+docker run -d -p 8100:8100 -p 6080:6080 blender-remote-mcp:latest
+```
+
 Live canvas: `http://localhost:8100/canvas?token=<api_key>`.
 
 ## Architecture - the call chain
@@ -53,9 +60,10 @@ Every MCP tool call crosses four process boundaries. Knowing them is what makes 
 
 ```
 MCP client
-  | HTTP POST /mcp, Authorization: Bearer blender_xxx
+  | POST /mcp, Authorization: Bearer blender_xxx, mcp-session-id
   v
-main_mcp.py         mcp_handler -> handle_mcp_request (hand-written JSON-RPC, no SDK)
+main_mcp.py         mcp_handler (transport Streamable HTTP, ecrit a la main)
+                    -> handle_mcp_request (protocole seul, ignore le canal)
   |                 mcp_<tool>() coroutine -> _call_blender(user_id, endpoint, ...)
   v
 src/container_manager.py   execute_on_container -> httpx to <host_address>:<api_port>
@@ -106,11 +114,32 @@ Inside the container, `supervisord.conf` runs, in priority order: fluxbox, blend
 
 Registration returns both a JWT (`access_token`, web UI) and a long-lived API key (`blender_<token>`, MCP). Users are persisted as JSON to `data/auth.json` (`AUTH_DATA_FILE`), and `data/` is gitignored. Web routes (`/canvas`, `/api/files/*`, `/api/session/info`) accept the API key from an `Authorization` header, a `blender_token` cookie, or a `?token=` query param - see `_get_user_from_request`.
 
+## Modes and sessions
+
+`MULTI_USER_MODE=true` (default) is the gateway: one container per authenticated
+user, spawned through the host Docker socket. `MULTI_USER_MODE=false` runs the
+server in the **same container** as Blender and reaches it on localhost - the
+form that deploys on an Onyxia pod, where there is no Docker daemon. The mode
+governs data isolation, not access: **authentication is required in both**.
+
+Sessions are a third tier of state, distinct from the user and from the Blender
+instance. Several agents open their own session on the same user, hence on the
+same instance, and work in parallel - verified with two concurrent
+`create_object` calls landing in one scene. Closing a session touches no
+container. `_points_d_acces(user_id)` is the single place that resolves host and
+ports for either mode.
+
+Transport is Streamable HTTP, protocol `2025-06-18` with negotiation down to
+`2025-03-26` and `2024-11-05`. Responses go out as SSE when the client accepts
+it, plain JSON otherwise - `mcp-remote` proxies do not announce
+`text/event-stream` and cannot read a stream. `GET /mcp` with an SSE `Accept`
+opens the legacy transport; without it, it returns server metadata. `DELETE`
+closes a session. Notifications are acknowledged with `202`.
+
 ## Gotchas
 
-- `JWT_SECRET` is a **hardcoded module constant** in `src/auth.py`; the `JWT_SECRET` env var set by docker-compose is ignored. Fix before any real deployment.
-- The `/stream/{user_id}` MJPEG proxy hardcodes `http://localhost:{stream_port}` instead of `container_manager.host_address`, so it only works when the server runs outside Docker.
-- `get_screenshot` performs a **full `bpy.ops.render.render`** with the scene's current engine (Eevee by default), not a viewport grab - it can be slow, and `configure_render` / `detect_gpu` change what it costs.
+- `get_screenshot` captures the X11 display with ffmpeg, not a render. The render path remains as a fallback and the response carries `method` (`x11` or `render`). The fallback forces Workbench and raises the camera `clip_end`, then **restores both** - the scene can be shared between sessions.
+- The bridge executes every command on Blender's **main thread** via `bpy.app.timers`; the socket thread only queues and waits. Never call `bpy` from the socket thread - `bpy` is not thread-safe. Messages are length-prefixed (4-byte big-endian), on both sides.
 - `execute_python` runs `exec()` in a namespace holding only `bpy` and `result`; the tool returns whatever the code assigns to `result`, stringified if it is not JSON-serializable. There is no sandbox - arbitrary code runs as root inside the user's container.
 - `/api/files/list` and friends implement file management by injecting Python through `execute_python` rather than by a dedicated container endpoint.
 - CORS is `allow_origins=["*"]` with credentials enabled.
