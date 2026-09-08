@@ -26,7 +26,7 @@ Hot reload: `main_mcp.py`, `src/`, `templates/`, `static/` are bind-mounted read
 
 **Ports**: compose publishes the server on **8100** (mapped to 8000 inside). `start.sh` / `start.bat` and several docs still print 8000 - the compose value is authoritative. Per-user containers get host ports allocated from 9000 (API), 9100 (MJPEG), 9200 (noVNC).
 
-Tests: `python -m pytest tests/ -q` - 25 tests, no Docker and no Blender needed
+Tests: `python -m pytest tests/ -q` - 26 tests, no Docker and no Blender needed
 (`tests/test_bridge.py` for the bridge framing and main-thread execution,
 `tests/test_transport.py` for the transport, sessions and modes).
 
@@ -144,17 +144,49 @@ closes a session. Notifications are acknowledged with `202`.
 
 - `get_screenshot` captures the X11 display with ffmpeg, not a render. The render path remains as a fallback and the response carries `method` (`x11` or `render`). The fallback forces Workbench and raises the camera `clip_end`, then **restores both** - the scene can be shared between sessions.
 - The bridge executes every command on Blender's **main thread** via `bpy.app.timers`; the socket thread only queues and waits. Never call `bpy` from the socket thread - `bpy` is not thread-safe. Messages are length-prefixed (4-byte big-endian), on both sides.
-- `execute_python` runs `exec()` in a namespace holding only `bpy` and `result`; the tool returns whatever the code assigns to `result`, stringified if it is not JSON-serializable. There is no sandbox - arbitrary code runs as root inside the user's container.
+- `execute_python` runs `exec()` in a namespace holding `bpy`, `mathutils` and `result`; the tool returns whatever the code assigns to `result`, serialized by `_serialize` - Blender vectors and matrices come back as lists, not as `repr` strings. There is no sandbox: arbitrary code runs as root inside the container. That is structural for a Blender service, and assumed rather than fenced - disposable container, no Docker socket in pod mode, CPU and memory capped.
 - `/api/files/list` and friends implement file management by injecting Python through `execute_python` rather than by a dedicated container endpoint.
-- CORS is `allow_origins=["*"]` with credentials enabled.
+- CORS accepts credentials only when `CORS_ORIGINS` lists explicit origins; otherwise it falls back to `*` without credentials, the pairing browsers reject anyway.
 - `docker/blender-canvas/startup.py` is copied into `/root/.config/blender/4.0/scripts/startup/` at image build time - editing it requires a rebuild, not a restart.
 - `data/`, `.wikichat/` and `nul` are gitignored; `nul` is a stray Windows artifact.
 
-## Legacy code - do not extend
+## Deployment on Onyxia / SSPCloud
 
-`main_mcp.py` is the only entry point. These are earlier iterations kept in the tree and imported by nothing that runs:
+`deploy/onyxia/blender-remote-mcp.yaml` deploys the mono mode: PVC, Secret,
+StatefulSet, Service, Ingress. Running at
+`https://user-nic01asfr-blender-mcp.user.lab.sspcloud.fr`.
 
-- `main_multiuser.py` + `src/mcp_server.py` (FastMCP-based server) and `src/mcp_blender_service.py`
-- `src/blender_manager.py`, `src/proxy.py`, `src/port_manager.py`, `src/models.py` (pre-Docker, local-process design)
+Three things there are not decoration, each learned the hard way:
 
-`ARCHITECTURE.md` and `docs/` describe design intent from that era and disagree with the code in places; trust `main_mcp.py` and `src/container_manager.py`.
+- **nginx timeouts at 600s.** A tool call can outlast a minute - a render, a
+  cold Blender. Without them the ingress returns 504 while the service is still
+  working.
+- **`/health/ready` for startup and readiness, `/health` for liveness.**
+  `/health` only says this server answers; `/health/ready` reaches Blender.
+  Probing readiness on the shallow one marks the pod ready as soon as uvicorn
+  listens. Liveness stays shallow on purpose: if Blender dies, supervisord
+  restarts it inside the container - restarting the whole pod would risk a
+  crash loop.
+- **PVC on `/projects`** with `AUTH_DATA_FILE=/projects/auth.json`, so accounts
+  survive a pod restart.
+
+Measured on the cluster: image pull 34s, Blender's bridge answering 11s after
+pod start under a 4-CPU limit, SSE passing the real ingress over HTTP/2.
+
+The service does **not** appear in Onyxia's "Mes services" - that needs a Helm
+chart and its `sh.onyxia.release.v1.<release>` metadata Secret.
+
+Image push is cheap after the first: Docker only sends missing layers, so a
+code change re-pushes seconds' worth of thin layers.
+
+## History
+
+`main_mcp.py` is the only entry point. Seven modules from earlier iterations
+(`main_multiuser.py`, `src/mcp_server.py`, `src/mcp_blender_service.py`,
+`src/blender_manager.py`, `src/proxy.py`, `src/port_manager.py`,
+`src/models.py`) were removed in `6e99ba1` - they imported only each other, and
+`src/proxy.py` imported a `main` module that never existed. Recoverable from
+git history if ever needed.
+
+`docs/` describes design intent from that era and disagrees with the code in
+places; `ARCHITECTURE.md` was rewritten (v3) and is current.
