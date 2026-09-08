@@ -83,6 +83,20 @@ RUN mkdir -p /root/.config/blender/4.0/scripts/startup && \
 RUN mkdir -p /root/.fluxbox
 COPY fluxbox-apps /root/.fluxbox/apps
 
+# Bornes de parallelisme et geometrie de l'affichage.
+#
+# Placees ici, apres les COPY : une ENV en tete de fichier invalide toutes les
+# couches suivantes, donc le telechargement de Blender et l'apt install.
+#
+# Dans un pod, nproc montre les CPU de la MACHINE et non le quota du cgroup —
+# 104 contre 4 mesures ici. Sans bornes, les bibliotheques dimensionnent leurs
+# fils sur le mauvais nombre et se sur-souscrivent.
+#
+# La geometrie est le premier levier de fluidite : chaque pixel est dessine par
+# le processeur (llvmpipe), relu par x11vnc, encode, puis relaye.
+ENV OMP_NUM_THREADS=4 \
+    DISPLAY_GEOMETRY=1280x720
+
 # Expose ports
 # 6080: noVNC web interface (browser VNC client)
 # 8080: HTTP API for Blender control

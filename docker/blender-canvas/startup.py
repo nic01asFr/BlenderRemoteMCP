@@ -5,6 +5,38 @@ Configured for Xvfb + Software OpenGL (Mesa llvmpipe) + noVNC
 """
 import bpy
 
+
+def _cpus_du_cgroup():
+    """Nombre de CPU reellement alloues, lu dans le cgroup.
+
+    cgroup v2 : /sys/fs/cgroup/cpu.max donne « quota periode », ou « max »
+    quand il n'y a pas de limite. cgroup v1 : deux fichiers separes.
+    Retourne None si rien n'est lisible — mieux vaut le defaut de Blender
+    qu'une valeur inventee.
+    """
+    import os
+
+    try:
+        with open("/sys/fs/cgroup/cpu.max") as f:
+            quota, periode = f.read().split()
+        if quota != "max":
+            return max(1, int(int(quota) / int(periode)))
+    except Exception:
+        pass
+
+    try:
+        with open("/sys/fs/cgroup/cpu/cpu.cfs_quota_us") as f:
+            quota = int(f.read())
+        with open("/sys/fs/cgroup/cpu/cpu.cfs_period_us") as f:
+            periode = int(f.read())
+        if quota > 0:
+            return max(1, int(quota / periode))
+    except Exception:
+        pass
+
+    return None
+
+
 def configure_blender():
     """Configure Blender for MCP operation with Software OpenGL"""
 
@@ -18,10 +50,28 @@ def configure_blender():
 
     # Set resolution
     try:
-        bpy.context.scene.render.resolution_x = 1920
-        bpy.context.scene.render.resolution_y = 1080
+        import os
+        largeur, hauteur = (os.environ.get("DISPLAY_GEOMETRY", "1280x720")
+                            .split("x")[:2])
+        bpy.context.scene.render.resolution_x = int(largeur)
+        bpy.context.scene.render.resolution_y = int(hauteur)
     except Exception:
         pass
+
+    # Nombre de fils aligne sur le quota REEL du container.
+    #
+    # Dans un pod, /proc et nproc montrent les CPU de la MACHINE, pas le quota
+    # du cgroup : Blender y lisait 104 coeurs pour un quota de 4 et lancait
+    # 256 fils. La sur-souscription coute plus qu'elle ne rapporte — commutation
+    # de contexte et cache piétiné — et c'est une cause directe de saccades.
+    try:
+        quota = _cpus_du_cgroup()
+        if quota:
+            bpy.context.scene.render.threads_mode = "FIXED"
+            bpy.context.scene.render.threads = quota
+            print(f"Threads Blender fixes a {quota} (quota du cgroup)")
+    except Exception as e:
+        print(f"Reglage des fils impossible : {e}")
 
     # Set viewport to Material Preview to see materials
     try:

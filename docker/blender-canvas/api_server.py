@@ -287,7 +287,10 @@ async def screenshot(width: int = 1920, height: int = 1080):
             [
                 "ffmpeg", "-y",
                 "-video_size", f"{width}x{height}",
-                "-framerate", "1",
+                # 30 et non 1 : avec -framerate 1, ffmpeg attend l'intervalle
+                # d'une image avant de rendre la main, soit une seconde perdue
+                # sur une capture unique.
+                "-framerate", "30",
                 "-f", "x11grab",
                 "-i", display,
                 "-frames:v", "1",
