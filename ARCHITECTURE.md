@@ -1,403 +1,252 @@
-# Architecture Blender MCP Server - Mode Unifié
+# Architecture BlenderRemoteMCP
 
-## 📋 Document de Référence
-**Version:** 2.0
-**Date:** 2026-01-04
-**Type:** Architecture unifiée avec support VNC intégré
-
----
-
-## 🎯 PRINCIPE GÉNÉRAL
-
-### Vue d'ensemble
-
-Le **Blender MCP Server** adopte une **architecture unifiée** où chaque instance Blender est accessible à la fois :
-- **Programmatiquement** via API REST (pour le contrôle MCP/LLM)
-- **Visuellement** via interface web noVNC (pour interaction humaine)
-
-Cette approche permet une **collaboration hybride** entre IA et humains sur la même instance Blender en temps réel.
-
-### Philosophie de conception
-
-```
-Un seul mode = Maximum de flexibilité + Minimum de complexité
-```
-
-**Principes directeurs :**
-1. ✅ **Toujours accessible** : VNC et API disponibles en permanence
-2. ✅ **Overhead minimal** : Services légers (~50MB RAM, <5% CPU)
-3. ✅ **Debuggable** : Visualisation temps réel de ce que fait le LLM
-4. ✅ **Flexible** : Supporte tous les cas d'usage sans reconfiguration
-5. ✅ **Simple** : Une seule configuration à maintenir
+Version 3.0 — 2026-09-06
+Remplace la v2.0 (2026-01-04, « Mode Unifié »), dont le principe de collaboration
+hybride IA/humain sur une même instance reste valide et est repris ici.
 
 ---
 
-## 🏗️ ARCHITECTURE TECHNIQUE
+## 1. Place du service dans la chaîne
 
-### Schéma global
+BlenderRemoteMCP n'est pas un produit autonome : c'est le maillon *runtime 3D*
+d'une chaîne qui existe déjà dans l'écosystème.
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                     UTILISATEURS / CLIENTS                       │
-├──────────────────────────┬──────────────────────────────────────┤
-│   Claude Desktop (MCP)   │   Navigateur Web                     │
-│   API REST               │   noVNC HTML5                        │
-└──────────┬───────────────┴──────────────┬───────────────────────┘
-           │                              │
-           │ HTTP/JSON-RPC                │ WebSocket (VNC)
-           │ Port 8100 → 8080             │ Port 6080
-           │                              │
-┌──────────▼──────────────────────────────▼───────────────────────┐
-│              BLENDER MCP SERVER (Container Host)                │
-│  ┌────────────────────────────────────────────────────────────┐ │
-│  │  main_mcp.py - Orchestrateur principal                     │ │
-│  │  - Gestion des sessions utilisateurs                       │ │
-│  │  - Création/démarrage des containers Blender               │ │
-│  │  - Routage des requêtes MCP → API Blender                  │ │
-│  └────────────────────────────────────────────────────────────┘ │
-└─────────────────────────┬───────────────────────────────────────┘
-                          │
-                          │ Crée et gère
-                          │
-           ┌──────────────┴──────────────┐
-           │                             │
-┌──────────▼─────────────┐    ┌─────────▼──────────────┐
-│  Blender User A        │    │  Blender User B        │
-│  (Container isolé)     │    │  (Container isolé)     │
-│                        │    │                        │
-│  ┌──────────────────┐  │    │  ┌──────────────────┐  │
-│  │ AFFICHAGE        │  │    │  │ AFFICHAGE        │  │
-│  │                  │  │    │  │                  │  │
-│  │ Xvfb :99         │  │    │  │ Xvfb :99         │  │
-│  │ (Virtual X)      │  │    │  │ (Virtual X)      │  │
-│  │   └─ fluxbox     │  │    │  │   └─ fluxbox     │  │
-│  │      (WM léger)  │  │    │  │      (WM léger)  │  │
-│  │        └─ Blender│  │    │  │        └─ Blender│  │
-│  │           (GUI)  │  │    │  │           (GUI)  │  │
-│  └───────┬──────────┘  │    │  └───────┬──────────┘  │
-│          │             │    │          │             │
-│    ┌─────┴─────┐       │    │    ┌─────┴─────┐       │
-│    │           │       │    │    │           │       │
-│    ▼           ▼       │    │    ▼           ▼       │
-│ ┌──────┐  ┌─────────┐ │    │ ┌──────┐  ┌─────────┐ │
-│ │ VNC  │  │ API REST│ │    │ │ VNC  │  │ API REST│ │
-│ │ 6080 │  │ 8080    │ │    │ │ 6080 │  │ 8080    │ │
-│ │      │  │         │ │    │ │      │  │         │ │
-│ │x11vnc│  │api_     │ │    │ │x11vnc│  │api_     │ │
-│ │noVNC │  │server.py│ │    │ │noVNC │  │server.py│ │
-│ │      │  │         │ │    │ │      │  │         │ │
-│ │      │  │blender_ │ │    │ │      │  │blender_ │ │
-│ │      │  │addon.py │ │    │ │      │  │addon.py │ │
-│ └──────┘  └─────────┘ │    │ └──────┘  └─────────┘ │
-│                        │    │                        │
-│ Ports: 9000, 9100      │    │ Ports: 9001, 9101      │
-└────────────────────────┘    └────────────────────────┘
+capture 3D           panoramax3d (STAC Panoramax -> cubemap -> COLMAP SfM
+                     -> DepthPro -> fusion TSDF -> PLY/LAS), pix2hdr,
+                     recalage visuel
+      |
+géo / référentiels   QgisRemoteMCP, Atlas, Scene Manifest V0.2
+      |
+runtime 3D           BlenderRemoteMCP        <-- ce dépôt
+      |
+métier               route : ARP 2022 / ICTAAL / ICTAVRU / Girabase
+                     BIM  : DTU 60.1, DTU 68.3, NF C 15-100, RE2020, IFC 4.3
+      |
+restitution          Atlas (widget + runtime + app), widgets Grist,
+                     storymaps, Strate
 ```
 
-### Stack technologique
+C'est le seul maillon dont ni l'amont ni l'aval ne sont câblés aujourd'hui.
 
-#### Container Blender (par utilisateur)
+### Répartition du rendu
 
-| Composant | Rôle | Port/Config |
-|-----------|------|-------------|
-| **Xvfb** | Serveur X virtuel (display :99) | Display virtuel |
-| **fluxbox** | Window manager léger | Gère les fenêtres |
-| **Blender 4.0** | Application 3D (mode GUI) | Connecté à :99 |
-| **Mesa llvmpipe** | OpenGL software rendering | LIBGL_ALWAYS_SOFTWARE=1 |
-| **x11vnc** | Serveur VNC (capture display) | Port interne 5900 |
-| **noVNC** | Client VNC web (WebSocket) | Port 6080 |
-| **api_server.py** | API REST FastAPI | Port 8080 |
-| **stream_server.py** | Stream MJPEG viewport | Port 8081 |
-| **blender_addon.py** | Plugin Blender (socket UNIX) | /tmp/blender.sock |
-| **supervisor** | Orchestrateur de processus | Gère tous les services |
+Point structurant, souvent mal compris : **Blender ne rend pas pour Atlas.**
+
+Le contrat Scene Manifest V0.2 définit `kind: 3d_model` avec `gltf_url` requis
+(plus `scale_field`, `rotation_field`), et `kind: extrusion` avec `height_field`.
+Le moteur Models3D du widget Atlas instancie ces GLTF en `InstancedMesh`, selon
+le pattern MapLibre custom layer + Three.js (en production dans cinq projets de
+l'écosystème). Atlas est donc le runtime de rendu et le livrable autonome.
+
+Il en découle deux sorties distinctes pour ce service :
+
+| Sortie | Consommateur | Nature |
+|---|---|---|
+| Assets GLTF + fragment de Scene Manifest | Atlas, widgets Grist | interactif, rendu côté client |
+| Images / vidéos / séquences | rapports, storymaps figées | rendu Blender (Eevee/Cycles) |
+
+La première est la voie principale et n'utilise pas le moteur de rendu de
+Blender. La seconde est un livrable séparé, pas une dégradation de la première.
 
 ---
 
-## 🔄 FLUX D'INTERACTION
+## 2. Architecture interne actuelle
 
-### Cas d'usage 1 : LLM seul (API)
-
-```
-Claude Desktop
-    │
-    │ MCP JSON-RPC
-    ▼
-main_mcp.py (port 8100)
-    │
-    │ HTTP POST /api/create_object
-    ▼
-api_server.py (port 8080)
-    │
-    │ UNIX socket
-    ▼
-blender_addon.py
-    │
-    │ bpy.ops.mesh.primitive_cube_add()
-    ▼
-Blender (exécute)
-    │
-    │ Rendu viewport
-    ▼
-Display Xvfb :99
-    │
-    │ (VNC disponible mais non utilisé)
-    ▼
-x11vnc + noVNC (en attente)
-```
-
-### Cas d'usage 2 : Humain seul (VNC)
+Tout appel d'outil traverse quatre frontières de processus :
 
 ```
-Navigateur
-    │
-    │ WebSocket
-    ▼
-noVNC (port 6080)
-    │
-    │ VNC Protocol
-    ▼
-x11vnc
-    │
-    │ Capture display :99
-    ▼
-Display Xvfb :99
-    │
-    │ Blender s'affiche
-    ▼
-Humain interagit
-    │
-    │ Clics/Clavier via VNC
-    ▼
-Blender (reçoit inputs)
+client MCP
+  | HTTP POST /mcp, Authorization: Bearer blender_xxx
+main_mcp.py            handler JSON-RPC écrit à la main (spec 2024-11-05)
+  | httpx vers le port hôte publié
+src/container_manager.py
+  |
+docker/blender-canvas/api_server.py        FastAPI :8080 dans le container
+  | socket Unix /tmp/blender_api.sock
+docker/blender-canvas/blender_addon.py     thread socket dans le process Blender
+  |
+bpy
 ```
 
-### Cas d'usage 3 : Collaboration (LLM + Humain) 🔥
+Le canvas navigateur suit un chemin parallèle : `/canvas` sert
+`templates/blender_canvas.html`, qui ouvre `/ws/{user_id}` ; le serveur relaie
+vers websockify, qui fronte x11vnc sur l'affichage Xvfb. Agent et humain
+partagent ainsi la même session GUI — c'est l'acquis de la v2.0, à conserver.
 
-```
-         Claude (MCP)              Humain (Navigateur)
-              │                            │
-              │                            │
-              ▼                            ▼
-         api_server                    noVNC
-              │                            │
-              └────────┬───────────────────┘
-                       │
-                       ▼
-                  Blender (scène partagée)
-                       │
-                       ▼
-                 Display :99
-                       │
-              ┌────────┴────────┐
-              │                 │
-              ▼                 ▼
-         x11vnc (stream)   Rendu temps réel
-              │
-              ▼
-      Humain voit les actions de Claude en direct !
-```
+### Défauts structurels de l'existant
 
-**Exemple concret :**
-1. Claude crée un cube via MCP → `create_object`
-2. Humain voit le cube apparaître en temps réel dans le navigateur
-3. Humain ajuste manuellement la position via VNC
-4. Claude ajoute une texture via MCP → `set_material`
-5. Humain voit la texture s'appliquer immédiatement
+1. **bpy exécuté hors du thread principal.** `SocketServer` tourne dans un
+   thread daemon et `handle_client` appelle le handler directement. `bpy` n'est
+   pas thread-safe : c'est une source de crashs et d'états corrompus.
+2. **Session MCP et utilisateur confondus.** `user_id` sert à la fois de clé de
+   session et de clé de container, ce qui interdit plusieurs agents sur une
+   instance.
+3. **Transport sans sessions.** `POST /mcp` simple, sans `Mcp-Session-Id` ni
+   SSE : pas de connecteur MCP distant, pas de progression sur les appels longs.
+4. **Isolation obligatoire.** Un container par utilisateur via le socket Docker
+   de l'hôte : modèle non portable sur un pod.
 
 ---
 
-## 🎨 SUPPORT RENDU (Software OpenGL)
+## 3. Architecture cible
 
-### Problématique
+Quatre couches, chacune reprise d'une source éprouvée plutôt que réécrite.
 
-**Sans Mesa llvmpipe :**
-```
-Eevee/Cycles → OpenGL requis → Xvfb basique ne supporte pas → SIGABRT crash
-```
+| Couche | Source | Contenu |
+|---|---|---|
+| Hébergement | ce dépôt | container Blender, Xvfb, noVNC, canvas, isolation, autosave, cleanup |
+| Pont vers bpy | BigLocalApps | `addons/blender/bigdesktop_bridge.py` |
+| Métier | BigDesktop | `profile_manager.py`, `conductor_engine.py`, `tools_app.py`, corpus YAML |
+| Forme de service | QgisRemoteMCP | streamable HTTP, flag mono/multi, skills en resources, auth, chart Onyxia |
 
-**Avec Mesa llvmpipe :**
-```
-Eevee/Cycles → OpenGL → llvmpipe (software) → Rendu CPU → ✅ Fonctionne
-```
+### Pont vers bpy
 
-### Configuration
+`bigdesktop_bridge.py` remplace `blender_addon.py`. Il résout le défaut 1 :
+file de requêtes plus files de réponses par `request_id`, exécution sur le
+thread principal via `bpy.app.timers.register(_poll_queue, persistent=True)`, et
+cadrage des messages sur 4 octets big-endian au lieu du délimiteur newline.
+C'est aussi le prérequis pour exécuter les actions de profil.
 
-```dockerfile
-# Packages Mesa pour software rendering
-RUN apt-get install -y \
-    mesa-utils \
-    libgl1-mesa-dri \
-    libgl1-mesa-glx \
-    libosmesa6 \
-    libglapi-mesa
+### Surface MCP : divulgation progressive
 
-# Variables d'environnement
-ENV LIBGL_ALWAYS_SOFTWARE=1  # Force software OpenGL
-ENV GALLIUM_DRIVER=llvmpipe   # Driver Mesa software
-ENV LP_NUM_THREADS=4          # Threads pour llvmpipe
-```
+Les actions métier ne sont pas exposées une par une. Le catalogue vit dans les
+profils, filtré par contexte et par posture, derrière une poignée d'outils
+génériques — c'est le modèle BigDesktop, et c'est le bon :
 
-### Moteurs de rendu supportés
+- `blender_action(action_id, params)` — dispatch dans le catalogue, validation
+  des paramètres, hook de feedback conducteur
+- `blender_context()` — détection d'état (workspace, mode, sélection)
+- `activate_extension(ext_id)` / `deactivate_extension(ext_id)`
+- `generate_code(...)` — voie d'échappement
+- outils propres à l'hébergement : capture d'écran, canvas exposé en resource
+  `ui://`, gestion des projets et fichiers
 
-| Moteur | Mode | Performance | Qualité |
-|--------|------|-------------|---------|
-| **Workbench** | CPU | ⚡ Rapide | Preview |
-| **Eevee** | CPU (llvmpipe) | 🐌 Lent | Temps réel |
-| **Cycles** | CPU | 🐌 Très lent | Photorealistic |
+Les 35 outils actuels recouvrent largement les 62 actions du profil Blender :
+ils sont à fusionner dans le catalogue, pas à empiler à côté.
 
-**Note :** Phase 3 (GPU) accélère Eevee/Cycles si NVIDIA disponible.
+### Transport
 
----
+FastMCP fournit nativement le streamable HTTP et BigDesktop l'utilise déjà, ses
+décorateurs portent donc sans conversion. De QgisRemoteMCP ne sont repris à la
+main que les éléments que FastMCP ne donne pas : le shim `/sse` de
+compatibilité `mcp-remote`, et la progression sur les rendus longs.
 
-## 📊 OVERHEAD ET PERFORMANCE
+`type QgisRemoteMCP` désigne ici la *forme de service* — mono/multi, skills en
+resources, auth, déployable sur pod — et non son transport écrit à la main.
 
-### Ressources consommées (par container)
+### Modes
 
-| Composant | RAM | CPU (idle) | CPU (actif) |
-|-----------|-----|------------|-------------|
-| Xvfb | 20 MB | 0% | 1-2% |
-| fluxbox | 10 MB | 0% | <1% |
-| x11vnc | 15 MB | 0% | 2-5% (si client connecté) |
-| noVNC | 5 MB | 0% | <1% |
-| **Total overhead VNC** | **~50 MB** | **<1%** | **5-8%** |
-| Blender | 400-800 MB | 5-10% | Variable |
-| **TOTAL container** | **~500-900 MB** | **5-10%** | Variable |
-
-### Analyse
-
-**Overhead VNC = 5-10% des ressources totales**
-- Négligeable pour les bénéfices apportés
-- Pas de dégradation de performance perceptible
-- Toujours accessible pour debug
+- `MULTI_USER_MODE=false` : image tout-en-un, le serveur MCP parle directement
+  à `api_server:8080` dans le même container ; un `program:mcp_server` s'ajoute
+  à `supervisord.conf`. C'est le mode déployable sur pod Onyxia, et il autorise
+  plusieurs sessions agent sur une même instance.
+- `MULTI_USER_MODE=true` : le gestionnaire de containers actuel, hors pod.
 
 ---
 
-## 🔒 SÉCURITÉ
+## 4. Où vit le métier
 
-### Contrôle d'accès
+Le découpage n'est pas « YAML ou modules Python ». C'est la place de la norme.
 
-```yaml
-# Production : Désactiver VNC externe
-ports:
-  - "8080:8080"  # API exposée
-  # - "6080:6080"  # VNC NON exposé (commenté)
+Girabase établit le pattern dans l'écosystème : un noyau de calcul (`engine.py`)
+vérifié par des tests de fidélité au VB6 CERTU d'origine, servi par plusieurs
+surfaces — API REST, page web, widget Grist, outil MCP. Le document
+`DEMARCHE.md` parle d'alternative « pluriforme ».
 
-# Développement : VNC accessible
-ports:
-  - "8080:8080"  # API
-  - "6080:6080"  # VNC pour debug
-```
+Conséquence pour ce service : **une action Blender est une surface, pas le lieu
+du métier.** Les contrôles normatifs (ARP, DTU, NF C 15-100, capacité de
+giratoire) appartiennent à un noyau partagé, indépendant de toute surface. Les
+enfermer dans des YAML d'actions Blender, ou dans un `src/route/norms.py`,
+revient au même défaut vu des deux côtés.
 
-### Authentification
+Le coût de ne pas tenir ce principe est déjà mesurable : le moteur Girabase
+existe en deux exemplaires divergents (471 et 615 lignes) synchronisés par un
+script de copie.
 
-- **API REST** : JWT token + API key (existant)
-- **VNC** : Pas de mot de passe par défaut (-nopw)
-  - ✅ OK si ports non exposés publiquement
-  - ⚠️ Ajouter `-passwd /path/to/vncpasswd` pour sécuriser si exposé
-
----
-
-## 🧪 TESTABILITÉ
-
-### Points de test
-
-1. **Software OpenGL** : `glxinfo | grep "OpenGL renderer"`
-   - Attendu : `llvmpipe (LLVM...)`
-
-2. **VNC accessible** : `curl http://localhost:6080/vnc.html`
-   - Attendu : HTTP 200, page HTML noVNC
-
-3. **Blender répond** : `curl http://localhost:8080/health`
-   - Attendu : `{"status": "ok"}`
-
-4. **Screenshot Cycles** : `curl http://localhost:8080/api/screenshot`
-   - Attendu : Base64 PNG, pas de SIGABRT
-
-5. **Interaction VNC** : Ouvrir navigateur → Voir Blender
-   - Attendu : Interface Blender responsive
+Piste ouverte : la spec formulaire de l'écosystème (axe
+`grist-forms-blocknote-binding`) pourrait déclarer une seule fois les paramètres
+d'une action et en dériver le formulaire Grist et l'`inputSchema` MCP.
 
 ---
 
-## 📝 JUSTIFICATIONS ARCHITECTURALES
+## 5. Contrats d'entrée et de sortie à câbler
 
-### Pourquoi mode unifié ?
+Ni la verticale route ni la verticale BIM ne les couvrent :
 
-| Critère | Mode unique | Deux modes |
-|---------|-------------|------------|
-| **Complexité code** | ✅ Simple | ❌ Conditionnelle |
-| **Maintenance** | ✅ Un seul chemin | ❌ Deux chemins à tester |
-| **Debug** | ✅ Toujours visualisable | ❌ Parfois aveugle |
-| **Overhead** | ⚠️ +50MB (+10%) | ✅ Minimal |
-| **Flexibilité** | ✅ Tous cas d'usage | ⚠️ Choix au déploiement |
-| **Démo/Formation** | ✅ Wow effect | ❌ Pas d'interface |
+- **entrée** : consommer un Scene Manifest (`layers[]`, `style.declarative`,
+  `camera`) pour construire une scène
+- **entrée** : importer des nuages de points PLY/LAS produits par panoramax3d
+- **sortie** : produire des GLTF et le fragment de Scene Manifest qui les
+  référence (`kind: 3d_model`, `gltf_url`)
 
-**Verdict :** Mode unique optimal pour ce projet (overhead négligeable, bénéfices énormes).
-
-### Pourquoi Software OpenGL d'abord ?
-
-1. **Universel** : Marche partout (GPU ou pas)
-2. **Simple** : Variables d'env + packages
-3. **Stable** : Pas de drivers GPU à gérer
-4. **Suffisant** : Pour prévisualisation MCP
-
-GPU (Phase 3) = Bonus performance, pas requis.
-
-### Pourquoi noVNC vs autres ?
-
-| Solution | Avantages | Inconvénients |
-|----------|-----------|---------------|
-| **noVNC** | ✅ HTML5 pur, pas d'install client | ⚠️ Latence légère |
-| TurboVNC | Performance maximale | ❌ Client natif requis |
-| Guacamole | Interface riche | ❌ Architecture complexe |
-| X11 forwarding | Natif | ❌ SSH tunnel, pas web |
-
-**Verdict :** noVNC = meilleur compromis simplicité/fonctionnalité.
+Le contrat Scene Manifest est en lecture seule ici : sa source de vérité est le
+modèle Pydantic de `cerema-offre-de-service`. Ne pas le redéclarer.
 
 ---
 
-## 🚀 ÉVOLUTION FUTURE
+## 6. Décisions ouvertes
 
-### Phase 3 (optionnelle) : GPU Support
-
-```yaml
-# Si NVIDIA GPU disponible sur l'hôte
-deploy:
-  resources:
-    reservations:
-      devices:
-        - driver: nvidia
-          count: all
-          capabilities: [gpu]
-```
-
-**Bénéfices :**
-- Eevee/Cycles 10-50x plus rapides
-- Rendu temps réel possible
-- Viewport fluide à 60fps
-
-**Quand l'implémenter ?**
-- Si serveur avec GPU NVIDIA
-- Si besoin de rendus rapides
-- Si interactions temps réel critiques
-
-### Extensions possibles
-
-1. **Multi-utilisateurs simultanés** : Partage de scène temps réel
-2. **Enregistrement sessions** : Replay des actions
-3. **Snapshots automatiques** : Versioning de scènes
-4. **API WebSocket** : Events temps réel (objet créé, modifié, etc.)
+1. **Positionnement.** Les documents `COMPETITIVE_ANALYSIS.md` et
+   `BRAND_ARCHITECTURE.md` visent un SaaS créatif grand public (« grille de
+   calcul 3D », `blendergrid.ai`). Tout l'usage réel documenté est un outil
+   métier Cerema. Le code actuel — inscription email/mot de passe, clé API,
+   cleanup à 30 minutes — sert le premier alors que la chaîne sert le second.
+2. **Format d'expression des actions métier**, avant que route et BIM ne
+   divergent définitivement (`PLAN.md` de BlenderRoads acte des modules Python
+   pour la route, BigDesktop reste en YAML pour le BIM).
+3. **Source de vérité du corpus** de profils, partagé entre BigDesktop
+   (desktop Windows) et ce service (container) : package versionné commun, pas
+   copie.
+4. **BlenderRoads.** Décision prise : ce n'est ni un fork ni une extension à
+   replier ici. C'est un produit métier — le pipeline complet de conception
+   routière professionnelle, guides et doctrines traduits en formules puis
+   gérées dans Blender — dont ce service est le socle d'hébergement. Reste à
+   organiser la dépendance : dépôt distinct consommant ce service, et remontée
+   ici des corrections de socle faites là-bas (capture X11, Workbench forcé en
+   headless, `clip_end` caméra).
+5. **`execute_python`.** Exécution arbitraire non bornée, structurelle pour un
+   service Blender. À assumer explicitement (container jetable, utilisateur non
+   root, pas de socket Docker en mode pod, quotas) plutôt qu'à sandboxer.
+6. **Licences.** Le `README.md` de ce dépôt annonce MIT sans fichier `LICENSE`.
+   BigLocalApps est MIT. Girabase est GPL-3.0, hérité du VB6 CERTU libéré par le
+   CEREMA — et BlenderRoads en embarque une copie. S'ajoute le fait que le code
+   exécuté à l'intérieur de Blender (addon, pont) relève des obligations GPL de
+   Blender, contrairement au serveur qui l'entoure. À trancher avant toute
+   publication ou fusion de ces briques.
 
 ---
 
-## 📚 RÉFÉRENCES
+## 8. État des dépôts (relevé 2026-09-06)
 
-- [Mesa llvmpipe Documentation](https://docs.mesa3d.org/drivers/llvmpipe.html)
-- [noVNC Project](https://github.com/novnc/noVNC)
-- [Blender Headless Rendering](https://docs.blender.org/manual/en/latest/advanced/command_line/render.html)
-- [Xvfb Manual](https://www.x.org/releases/X11R7.6/doc/man/man1/Xvfb.1.xhtml)
+À corriger avant tout portage, indépendamment des choix d'architecture :
+
+- Le dépôt GitHub porte déjà le nom `BlenderRemoteMCP` (privé) ; le remote local
+  pointe encore sur l'ancienne URL et ne fonctionne que par redirection.
+- `origin/main` ne contient que le commit initial : le commit local du canvas
+  noVNC n'est pas poussé.
+- Le dépôt sert d'hôte de *releases* pour pix2hdr (deux tags posés sur le commit
+  initial). Usage à assumer explicitement ou à déplacer.
+- **BlenderRoads n'a aucun dépôt git**, pas plus que le dossier Girabase local ;
+  panoramax3d a un git sans remote. Le métier route, l'étude `PLAN.md` et le
+  widget maître Girabase ne sont donc ni versionnés ni sauvegardés.
+- Le dépôt public `nic01asFr/Girabase` existe pourtant : fork du dépôt CEREMA
+  (sources VB6, exécutable, `LICENSE` GPL-3.0) avec le portage moderne sous
+  `web/`, servi par GitHub Pages. Le dossier local en est déconnecté.
+- Rythme : QgisRemoteMCP, Qgis-sspcloud et Widgets-Grist sont actifs au
+  2026-09-06 ; ce dépôt est au 2026-01-09 et BigDesktop au 2026-03-28, ce
+  dernier en avance d'un mois sur son propre remote.
 
 ---
 
-**Document maintenu par :** Claude Code
-**Dernière révision :** 2026-01-04
-**Statut :** Architecture approuvée, prête pour implémentation
+## 7. État projet et concurrence
+
+- L'état conducteur (manifeste, trame vivante) doit vivre dans le volume
+  `/projects` de l'utilisateur, jamais dans un fichier global.
+- Le cas d'usage BIM réel est deux agents de postures différentes (plomberie,
+  électricité) sur la même instance. La file du pont sérialise déjà les appels
+  bpy ; reste à câbler le verrouillage par lot sur les sessions MCP — le
+  `lot_interface` et la porte `AUTO_PASS | PENDING_MOE` existent déjà côté
+  BigDesktop.
+- Le profil vise Blender 4.5, l'image container est en 4.0.2 : à aligner avant
+  tout test d'action.

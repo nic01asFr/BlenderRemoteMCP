@@ -32,3 +32,6 @@ data/
 .env
 *.pem
 credentials.json
+
+# WikiChat overlay (auto-added)
+.wikichat/
