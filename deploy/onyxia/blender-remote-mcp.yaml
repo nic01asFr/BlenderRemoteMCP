@@ -1,0 +1,186 @@
+# BlenderRemoteMCP sur SSPCloud / Onyxia — mode mono-utilisateur.
+#
+# Manifeste direct, applicable par kubectl. Le chart Helm viendra apres : il
+# est ce qui rend le service VISIBLE dans « Mes services » d'Onyxia, via le
+# Secret de metadonnees sh.onyxia.release.v1.<release>. Sans lui le service
+# tourne mais n'existe pas pour l'interface.
+#
+#   kubectl apply -f deploy/onyxia/blender-remote-mcp.yaml
+#
+# Prerequis : l'image poussee sur ghcr.io/nic01asfr/blender-remote-mcp et le
+# secret ghcr-creds present dans le namespace.
+#
+# Forme calquee sur qgis-hub, qui tourne dans ce meme namespace : memes
+# conventions d'hote, memes annotations de temporisation.
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: blender-remote-mcp-projects
+  labels:
+    app: blender-remote-mcp
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 10Gi
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: blender-remote-mcp-secrets
+  labels:
+    app: blender-remote-mcp
+type: Opaque
+stringData:
+  # A remplacer avant application. Sans cela le service signe ses jetons avec
+  # une valeur connue : c'est precisement le defaut corrige dans src/auth.py,
+  # inutile de le reintroduire par le deploiement.
+  JWT_SECRET: "REMPLACER-AVANT-APPLICATION"
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: blender-remote-mcp
+  labels:
+    app: blender-remote-mcp
+spec:
+  serviceName: blender-remote-mcp
+  replicas: 1
+  selector:
+    matchLabels:
+      app: blender-remote-mcp
+  template:
+    metadata:
+      labels:
+        app: blender-remote-mcp
+    spec:
+      imagePullSecrets:
+        - name: ghcr-creds
+      containers:
+        - name: blender-remote-mcp
+          image: ghcr.io/nic01asfr/blender-remote-mcp:latest
+          imagePullPolicy: Always
+          ports:
+            - name: mcp
+              containerPort: 8100
+            - name: novnc
+              containerPort: 6080
+          env:
+            # Mode mono : une seule instance Blender, dans ce container. Il n'y
+            # a pas de demon Docker sur un pod, le mode passerelle est donc
+            # inapplicable ici.
+            - name: MULTI_USER_MODE
+              value: "false"
+            - name: PORT
+              value: "8100"
+            # L'authentification reste requise en mono : le mode regle
+            # l'isolation des donnees, pas l'acces au service.
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: blender-remote-mcp-secrets
+                  key: JWT_SECRET
+            # Les comptes survivent aux redemarrages du pod.
+            - name: AUTH_DATA_FILE
+              value: /projects/auth.json
+            - name: PYTHONUNBUFFERED
+              value: "1"
+          resources:
+            requests:
+              # Blender tourne en OpenGL logiciel (llvmpipe) : le CPU est la
+              # ressource critique, pas le GPU, qui n'existe pas ici.
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              cpu: "4"
+              memory: 6Gi
+          volumeMounts:
+            - name: projects
+              mountPath: /projects
+            # Xvfb, Blender et les captures ecrivent dans /tmp ; le socket du
+            # pont y vit aussi.
+            - name: tmp
+              mountPath: /tmp
+          startupProbe:
+            # Blender met une bonne minute a etre pret. Tant que cette sonde
+            # n'a pas reussi, les deux autres ne sont pas evaluees.
+            httpGet:
+              path: /health
+              port: 8100
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8100
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8100
+            periodSeconds: 30
+            failureThreshold: 4
+      volumes:
+        - name: projects
+          persistentVolumeClaim:
+            claimName: blender-remote-mcp-projects
+        - name: tmp
+          emptyDir: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: blender-remote-mcp
+  labels:
+    app: blender-remote-mcp
+spec:
+  selector:
+    app: blender-remote-mcp
+  ports:
+    - name: mcp
+      port: 8100
+      targetPort: 8100
+    - name: novnc
+      port: 6080
+      targetPort: 6080
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: blender-remote-mcp
+  labels:
+    app: blender-remote-mcp
+  annotations:
+    # Un appel d'outil peut depasser la minute — un rendu, le demarrage de
+    # Blender. Sans ces temporisations, l'ingress rend un 504 alors que le
+    # service travaille encore.
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+    # Le flux SSE du transport ne doit pas etre accumule par le proxy. Le
+    # serveur pose deja X-Accel-Buffering: no sur ses reponses de flux, que
+    # nginx respecte au cas par cas ; cette annotation le garantit au niveau
+    # de l'ingress si un jour une reponse oubliait l'en-tete.
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: user-nic01asfr-blender-mcp.user.lab.sspcloud.fr
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: blender-remote-mcp
+                port:
+                  number: 8100
+  tls:
+    - hosts:
+        - user-nic01asfr-blender-mcp.user.lab.sspcloud.fr
