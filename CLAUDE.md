@@ -26,7 +26,11 @@ Hot reload: `main_mcp.py`, `src/`, `templates/`, `static/` are bind-mounted read
 
 **Ports**: compose publishes the server on **8100** (mapped to 8000 inside). `start.sh` / `start.bat` and several docs still print 8000 - the compose value is authoritative. Per-user containers get host ports allocated from 9000 (API), 9100 (MJPEG), 9200 (noVNC).
 
-Smoke test (no test suite exists in this repo):
+Tests: `python -m pytest tests/ -q` - 25 tests, no Docker and no Blender needed
+(`tests/test_bridge.py` for the bridge framing and main-thread execution,
+`tests/test_transport.py` for the transport, sessions and modes).
+
+Smoke test against a running server:
 
 ```bash
 # 1. register, keep the returned api_key
