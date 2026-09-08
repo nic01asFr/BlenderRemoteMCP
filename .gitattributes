@@ -1,0 +1,17 @@
+# Les fichiers qui entrent dans une image Linux doivent garder des fins de
+# ligne LF, quelle que soit la plateforme de travail.
+#
+# Sans cette regle, git extrait entrypoint.sh en CRLF sur Windows, Docker le
+# copie tel quel dans le container, et le shebang devient « #!/bin/bash » suivi
+# d'un retour chariot — un interpreteur qui n'existe pas. Le container part
+# alors en boucle de redemarrage sur « no such file or directory », alors que
+# le fichier est bien la.
+
+* text=auto eol=lf
+
+*.sh    text eol=lf
+*.conf  text eol=lf
+*.py    text eol=lf
+*.yaml  text eol=lf
+*.yml   text eol=lf
+Dockerfile text eol=lf
