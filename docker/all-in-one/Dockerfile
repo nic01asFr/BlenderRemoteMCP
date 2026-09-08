@@ -15,17 +15,27 @@
 
 FROM blender-canvas:latest
 
-# Dependances du serveur MCP. fastapi, uvicorn et aiofiles viennent de l'image
-# de base. Le SDK docker reste necessaire : main_mcp importe container_manager
-# au chargement, meme quand le mode mono ne s'en sert pas.
+# Dependances du serveur MCP. Le SDK docker reste necessaire : main_mcp
+# importe container_manager au chargement, meme quand le mode mono ne s'en
+# sert pas.
+#
+# Versions bornees a dessein. Sans bornes, l'image installe les dernieres
+# versions au moment du build et derive de l'environnement de developpement :
+# c'est ainsi qu'un appel a TemplateResponse valide en local a echoue ici, la
+# signature ayant change entre deux majeures de Starlette. Les tests locaux ne
+# peuvent pas attraper ce genre d'ecart.
 RUN pip3 install --no-cache-dir \
-        httpx \
-        pyjwt \
-        "pydantic[email]" \
-        websockets \
-        docker \
-        jinja2 \
-        python-multipart
+        "fastapi>=0.115,<1.0" \
+        "starlette>=0.40,<2.0" \
+        "uvicorn[standard]>=0.30,<1.0" \
+        "httpx>=0.28,<1.0" \
+        "pyjwt>=2.8,<3.0" \
+        "pydantic[email]>=2.7,<3.0" \
+        "websockets>=15.0,<16.0" \
+        "docker>=7.0,<8.0" \
+        "jinja2>=3.1,<4.0" \
+        "python-multipart>=0.0.9,<1.0" \
+        "aiofiles>=23.0,<25.0"
 
 WORKDIR /app
 

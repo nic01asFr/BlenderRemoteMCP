@@ -253,3 +253,24 @@ def test_disponibilite_distincte_de_la_vie(client, monkeypatch):
     r = client.get("/health/ready")
     assert r.status_code == 200
     assert r.json()["status"] == "ready"
+
+
+# ── Rendu des gabarits ───────────────────────────────────────────────────────
+
+def test_canvas_rend_la_page_en_mode_mono(client, cle, monkeypatch):
+    """Garde-fou contre la signature de TemplateResponse.
+
+    Starlette 1.x a retire la forme TemplateResponse(nom, contexte) : elle y
+    echoue sur « unhashable type: dict », le contexte etant pris pour une cle
+    de cache. Le defaut ne s'est vu qu'en deployant, l'image installant des
+    paquets plus recents que l'environnement local.
+    """
+    monkeypatch.setattr(main_mcp, "MULTI_USER_MODE", False)
+    r = client.get(f"/canvas?token={cle}")
+    assert r.status_code == 200, r.text[:300]
+    assert "/static/novnc/core/rfb.js" in r.text
+
+
+def test_accueil_rend_la_page(client):
+    r = client.get("/")
+    assert r.status_code == 200

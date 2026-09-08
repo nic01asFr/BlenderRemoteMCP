@@ -179,6 +179,19 @@ chart and its `sh.onyxia.release.v1.<release>` metadata Secret.
 Image push is cheap after the first: Docker only sends missing layers, so a
 code change re-pushes seconds' worth of thin layers.
 
+### Image drifts from your local environment
+
+The all-in-one image installs its own Python dependencies, and they are newer
+than a typical local checkout - `starlette 1.6` in the image against `0.48`
+locally at the time of writing. A call that passes every local test can still
+fail in the pod when an API changed between majors: that is exactly how
+`TemplateResponse(name, context)` reached production, where Starlette 1.x
+rejects it with `unhashable type: dict`.
+
+Versions are bounded in `docker/all-in-one/Dockerfile` to keep the drift from
+being silent, but bounds are not equality. **After any change touching a
+framework API, smoke-test the deployed service, not just `pytest`.**
+
 ## History
 
 `main_mcp.py` is the only entry point. Seven modules from earlier iterations

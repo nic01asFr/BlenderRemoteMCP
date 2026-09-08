@@ -2112,12 +2112,14 @@ async def canvas_page(request: Request, token: str = None):
         </html>
         """, status_code=500)
 
-    # Return pure canvas page
-    return templates.TemplateResponse("blender_canvas.html", {
-        "request": request,
+    # Signature moderne de Starlette : la requete passe en premier argument.
+    # L'ancienne forme TemplateResponse(nom, contexte) a ete retiree dans
+    # Starlette 1.x, ou elle echoue sur « unhashable type: dict » — le
+    # dictionnaire de contexte etant pris pour une cle de cache.
+    return templates.TemplateResponse(request, "blender_canvas.html", {
         "user_id": user.id,
         "session": session.to_dict() if hasattr(session, 'to_dict') else {},
-        "token": auth_token
+        "token": auth_token,
     })
 
 
@@ -2338,7 +2340,7 @@ else:
 async def home(request: Request):
     """Web UI for registration and stream viewing"""
     if templates:
-        return templates.TemplateResponse("canvas.html", {"request": request})
+        return templates.TemplateResponse(request, "canvas.html", {})
     return HTMLResponse("""
     <html>
     <head><title>Blender MCP Server</title></head>
