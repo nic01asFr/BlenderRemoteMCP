@@ -274,3 +274,50 @@ def test_canvas_rend_la_page_en_mode_mono(client, cle, monkeypatch):
 def test_accueil_rend_la_page(client):
     r = client.get("/")
     assert r.status_code == 200
+
+
+# ── Authentification des canaux media ────────────────────────────────────────
+#
+# Ces deux routes portent l'identifiant utilisateur dans le chemin. Elles ne
+# verifiaient rien : en mode mono, ou la resolution ignore l'identifiant,
+# /ws/<n-importe-quoi> ouvrait le clavier et la souris de Blender a tout
+# venant, et /stream/<n-importe-quoi> son ecran. Constate sur le service
+# public le 08/09/2026.
+
+def test_flux_refuse_sans_jeton(client):
+    assert client.get("/stream/utilisateur-invente").status_code == 401
+
+
+def test_flux_refuse_un_autre_utilisateur(client, cle, monkeypatch):
+    monkeypatch.setattr(main_mcp, "MULTI_USER_MODE", False)
+    r = client.get("/stream/quelqu-un-d-autre", headers={"Authorization": f"Bearer {cle}"})
+    assert r.status_code == 401, "un porteur valide ne doit pas voir l'ecran d'un autre"
+
+
+def test_websocket_vnc_refuse_sans_jeton(client):
+    from starlette.websockets import WebSocketDisconnect
+    with pytest.raises(WebSocketDisconnect) as excinfo:
+        with client.websocket_connect("/ws/utilisateur-invente"):
+            pass
+    assert excinfo.value.code == 4401
+
+
+def test_websocket_vnc_refuse_un_autre_utilisateur(client, cle):
+    from starlette.websockets import WebSocketDisconnect
+    with pytest.raises(WebSocketDisconnect) as excinfo:
+        with client.websocket_connect(f"/ws/quelqu-un-d-autre?token={cle}"):
+            pass
+    assert excinfo.value.code == 4401
+
+
+def test_canvas_pose_le_cookie_du_websocket(client, cle, monkeypatch):
+    """Sans ce cookie le canvas ne peut plus s'authentifier : un navigateur ne
+    pose pas d'en-tete Authorization sur un WebSocket."""
+    monkeypatch.setattr(main_mcp, "MULTI_USER_MODE", False)
+    r = client.get(f"/canvas?token={cle}")
+    assert r.status_code == 200
+    biscuit = r.cookies.get("blender_token")
+    assert biscuit == cle
+    entete = r.headers.get("set-cookie", "")
+    assert "httponly" in entete.lower(), "le jeton doit rester hors de portee du JavaScript"
+    assert "samesite=strict" in entete.lower()

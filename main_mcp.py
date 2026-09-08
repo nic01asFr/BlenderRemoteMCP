@@ -1922,9 +1922,37 @@ async def login(data: UserLogin):
 # STREAM ENDPOINT
 # =============================================================================
 
+async def _utilisateur_du_websocket(websocket: WebSocket):
+    """Resout l'utilisateur d'une connexion WebSocket.
+
+    Un navigateur ne peut pas poser d'en-tete Authorization sur un
+    WebSocket : le jeton arrive donc par le cookie pose par /canvas, ou a
+    defaut en parametre de requete.
+    """
+    jeton = (websocket.cookies.get("blender_token")
+             or websocket.query_params.get("token"))
+    if not jeton:
+        entete = websocket.headers.get("authorization", "")
+        if entete.startswith("Bearer "):
+            jeton = entete[7:].strip()
+    if not jeton:
+        return None
+    return await auth_manager.verify_api_key(jeton)
+
+
 @app.get("/stream/{user_id}")
-async def stream(user_id: str):
-    """MJPEG stream from user's Blender container"""
+async def stream(user_id: str, request: Request):
+    """Flux MJPEG de l'instance Blender de cet utilisateur.
+
+    L'identifiant dans le chemin ne vaut PAS authentification : en mode
+    mono il est meme ignore par la resolution, donc n'importe quelle
+    chaine y ouvrait le flux. Le porteur doit prouver son identite, et
+    etre celui qu'il demande.
+    """
+    user = await _get_user_from_request(request)
+    if user is None or user.id != user_id:
+        raise HTTPException(status_code=401, detail="Authentification requise")
+
     try:
         hote, _, port_flux, _ = _points_d_acces(user_id)
     except Exception:
@@ -1959,6 +1987,14 @@ async def vnc_websocket_proxy(websocket: WebSocket, user_id: str):
     WebSocket proxy to user's VNC server (via websockify).
     Enables direct browser connection to Blender viewport.
     """
+    # Authentifier AVANT d'accepter : ce canal donne le clavier et la
+    # souris de Blender, donc l'execution de code dans le container. Sans
+    # ce controle, /ws/<n-importe-quoi> ouvrait le bureau a tout venant.
+    user = await _utilisateur_du_websocket(websocket)
+    if user is None or user.id != user_id:
+        await websocket.close(code=4401)   # 4401 : non authentifie
+        return
+
     # L'instance doit etre joignable avant d'accepter la connexion
     try:
         hote, _, _, port_novnc = _points_d_acces(user_id)
@@ -2116,11 +2152,21 @@ async def canvas_page(request: Request, token: str = None):
     # L'ancienne forme TemplateResponse(nom, contexte) a ete retiree dans
     # Starlette 1.x, ou elle echoue sur « unhashable type: dict » — le
     # dictionnaire de contexte etant pris pour une cle de cache.
-    return templates.TemplateResponse(request, "blender_canvas.html", {
+    reponse = templates.TemplateResponse(request, "blender_canvas.html", {
         "user_id": user.id,
         "session": session.to_dict() if hasattr(session, 'to_dict') else {},
         "token": auth_token,
     })
+    # Le WebSocket du canvas s'authentifie par ce cookie : un navigateur ne
+    # peut pas poser d'en-tete Authorization sur une connexion WebSocket.
+    # httponly : le jeton reste hors de portee du JavaScript de la page.
+    reponse.set_cookie(
+        "blender_token", auth_token,
+        httponly=True, samesite="strict",
+        secure=request.url.scheme == "https",
+        max_age=7 * 24 * 3600,
+    )
+    return reponse
 
 
 @app.get("/api/session/info")
