@@ -26,5 +26,22 @@ until xdpyinfo -display :99 > /dev/null 2>&1; do
 done
 echo "Display :99 ready"
 
+# Quota CPU reel du container, pour borner l'ordonnanceur de Blender.
+# Dans un pod, nproc montre les CPU de la MACHINE et non le quota du cgroup.
+if [ -r /sys/fs/cgroup/cpu.max ]; then
+    read -r QUOTA PERIODE < /sys/fs/cgroup/cpu.max
+    [ "$QUOTA" != "max" ] && BLENDER_THREADS=$(( QUOTA / PERIODE ))
+elif [ -r /sys/fs/cgroup/cpu/cpu.cfs_quota_us ]; then
+    QUOTA=$(cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us)
+    PERIODE=$(cat /sys/fs/cgroup/cpu/cpu.cfs_period_us)
+    [ "$QUOTA" -gt 0 ] && BLENDER_THREADS=$(( QUOTA / PERIODE ))
+fi
+# Repli sur nproc si aucun quota n'est lisible : sans limite de cgroup, les
+# CPU de la machine SONT ceux du container.
+BLENDER_THREADS="${BLENDER_THREADS:-$(nproc)}"
+[ "$BLENDER_THREADS" -lt 1 ] && BLENDER_THREADS=1
+export BLENDER_THREADS
+echo "Quota CPU detecte : ${BLENDER_THREADS} fil(s) pour Blender"
+
 # Start supervisor (manages all processes)
 exec /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf

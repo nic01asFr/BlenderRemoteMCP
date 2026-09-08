@@ -103,8 +103,45 @@ def configure_blender():
 
     print("Blender configured for MCP operation")
 
+def _appliquer_reglages_de_scene(*_):
+    """Reglages portes par la SCENE, donc reinitialises a chaque chargement.
+
+    resolution_x/y et threads_mode vivent dans le fichier .blend : les poser au
+    demarrage ne sert a rien, le chargement de la scene par defaut les ecrase
+    aussitot. Il faut les reappliquer apres chaque chargement.
+
+    C'est ce qui rendait l'ancien reglage de resolution silencieusement
+    inoperant : il posait 1920x1080, qui se trouve etre la valeur par defaut,
+    donc personne ne voyait qu'il ne prenait pas.
+    """
+    import os
+
+    try:
+        rendu = bpy.context.scene.render
+    except Exception:
+        return
+
+    try:
+        largeur, hauteur = os.environ.get("DISPLAY_GEOMETRY", "1280x720").split("x")[:2]
+        rendu.resolution_x = int(largeur)
+        rendu.resolution_y = int(hauteur)
+    except Exception as e:
+        print(f"Resolution non appliquee : {e}")
+
+    try:
+        quota = _cpus_du_cgroup()
+        if quota:
+            rendu.threads_mode = "FIXED"
+            rendu.threads = quota
+    except Exception as e:
+        print(f"Fils de rendu non appliques : {e}")
+
+
 # Run on startup with error handling
 try:
     configure_blender()
+    _appliquer_reglages_de_scene()
+    bpy.app.handlers.load_post.append(_appliquer_reglages_de_scene)
+    print("Reglages de scene armes sur load_post")
 except Exception as e:
     print(f"Startup configuration warning: {e}")
