@@ -218,8 +218,21 @@ def test_serialisation_des_types_blender(addon):
         def to_tuple(self):
             return ((1, 0), (0, 1))
 
+    class FauxSequence:
+        """Protocole de sequence sans __iter__, comme mathutils.Matrix."""
+
+        def __len__(self):
+            return 2
+
+        def __getitem__(self, i):
+            if i >= 2:
+                raise IndexError(i)
+            return FauxVector()
+
     assert addon._serialize(FauxVector()) == [1.0, 2.0, 3.0]
     assert addon._serialize(FauxMatrix()) == [(1, 0), (0, 1)]
+    assert not hasattr(FauxSequence(), "__iter__")
+    assert addon._serialize(FauxSequence()) == [[1.0, 2.0, 3.0], [1.0, 2.0, 3.0]]
     assert addon._serialize({"v": FauxVector()}) == {"v": [1.0, 2.0, 3.0]}
     assert addon._serialize([1, "a", None, True]) == [1, "a", None, True]
     assert addon._serialize(object()).startswith("<object")

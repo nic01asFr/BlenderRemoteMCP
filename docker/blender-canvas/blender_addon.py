@@ -59,12 +59,15 @@ def _serialize(obj):
         return obj.to_list()
     if hasattr(obj, "to_tuple"):
         return list(obj.to_tuple())
-    if hasattr(obj, "__iter__"):
-        try:
-            return [_serialize(x) for x in obj]
-        except Exception:
-            return str(obj)
-    return str(obj)
+    # mathutils.Matrix implemente le protocole de sequence (__getitem__ et
+    # __len__) SANS exposer __iter__ : un test hasattr(obj, "__iter__") le
+    # manque et le renvoie en repr. Passer par iter() couvre les deux
+    # protocoles. Verifie dans le container : Matrix rend bien ses lignes.
+    try:
+        elements = list(obj)
+    except Exception:
+        return str(obj)
+    return [_serialize(x) for x in elements]
 
 
 class BlenderAPIHandler:
