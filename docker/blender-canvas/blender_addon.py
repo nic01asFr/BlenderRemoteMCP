@@ -365,8 +365,18 @@ class BlenderAPIHandler:
         temp_path = tempfile.mktemp(suffix=".png")
         scene.render.filepath = temp_path
 
+        # Workbench ne demande pas de GPU reel : EEVEE et Cycles echouent ou
+        # plantent sous Xvfb en OpenGL logiciel. L'etat est restaure ensuite,
+        # la scene pouvant etre partagee par plusieurs sessions.
+        moteur_initial = scene.render.engine
+        camera = scene.camera
+        clip_initial = camera.data.clip_end if camera else None
+
         try:
-            # Render with current engine (Eevee by default)
+            scene.render.engine = "BLENDER_WORKBENCH"
+            if camera:
+                # Une scene de terrain deborde largement le clip par defaut.
+                camera.data.clip_end = max(camera.data.clip_end, 100000.0)
             bpy.ops.render.render(write_still=True)
 
             with open(temp_path, 'rb') as f:
@@ -383,6 +393,15 @@ class BlenderAPIHandler:
             }
         except Exception as e:
             return {"success": False, "error": str(e)}
+        finally:
+            # Restaurer l'etat : la scene peut etre partagee par plusieurs
+            # sessions, une capture ne doit pas changer leur moteur de rendu.
+            try:
+                scene.render.engine = moteur_initial
+                if camera is not None and clip_initial is not None:
+                    camera.data.clip_end = clip_initial
+            except Exception:
+                pass
 
     def detect_gpu(self, cmd):
         """Detect available GPU devices for rendering"""

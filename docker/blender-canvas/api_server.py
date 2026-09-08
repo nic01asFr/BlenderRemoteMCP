@@ -262,22 +262,68 @@ async def load_project(request: LoadRequest):
 
 @app.get("/api/screenshot")
 async def screenshot(width: int = 1920, height: int = 1080):
-    """Take viewport screenshot (max 1MB output)"""
-    # Limit resolution to keep output under 1MB
-    max_pixels = 1920 * 1080  # ~1MB PNG limit
+    """Capture de l'ecran X11 par ffmpeg, avec repli sur un rendu Blender.
+
+    Une capture d'ecran doit montrer ce que l'utilisateur voit dans le canvas :
+    l'interface, le mode courant, la selection. L'ancienne implementation
+    lancait un rendu complet (bpy.ops.render.render) avec le moteur de la
+    scene — lent, et Eevee ou Cycles echouent sous Xvfb sans GPU reel.
+
+    ffmpeg est deja present dans l'image : stream_server.py s'en sert pour le
+    flux MJPEG.
+    """
+    import tempfile
+
+    max_pixels = 1920 * 1080
     if width * height > max_pixels:
         scale = (max_pixels / (width * height)) ** 0.5
         width = int(width * scale)
         height = int(height * scale)
 
-    result = send_to_blender({
-        "action": "screenshot",
-        "width": width,
-        "height": height
-    })
-    if not result.get("success"):
-        raise HTTPException(status_code=500, detail=result.get("error"))
-    return result
+    display = os.environ.get("DISPLAY", ":99")
+    tmp_png = tempfile.mktemp(suffix=".png")
+    try:
+        subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-video_size", f"{width}x{height}",
+                "-framerate", "1",
+                "-f", "x11grab",
+                "-i", display,
+                "-frames:v", "1",
+                tmp_png,
+            ],
+            env={**os.environ, "DISPLAY": display},
+            check=True, timeout=20,
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+        )
+        with open(tmp_png, "rb") as f:
+            data = base64.b64encode(f.read()).decode()
+        return {
+            "success": True, "format": "png", "method": "x11",
+            "width": width, "height": height, "data": data,
+        }
+    except Exception as capture_error:
+        # Repli : rendu par Blender. Plus lent, mais reste utile si la capture
+        # X11 echoue (display absent, ffmpeg indisponible).
+        result = send_to_blender({
+            "action": "screenshot", "width": width, "height": height,
+        })
+        if not result.get("success"):
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"Capture X11 echouee ({capture_error}) "
+                    f"et rendu de repli echoue ({result.get('error')})"
+                ),
+            )
+        result["method"] = "render"
+        return result
+    finally:
+        try:
+            os.remove(tmp_png)
+        except Exception:
+            pass
 
 
 @app.get("/api/gpu")
