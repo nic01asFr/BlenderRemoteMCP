@@ -2364,6 +2364,48 @@ async def health():
     }
 
 
+@app.get("/health/ready")
+async def health_ready():
+    """Sonde de disponibilite : verifie la chaine jusqu'a Blender.
+
+    /health atteste que CE serveur repond ; celle-ci que Blender repond. Les
+    deux ne se valent pas, et les confondre a un cout concret : en pod,
+    Kubernetes marque le service disponible des que uvicorn ecoute et lui
+    envoie du trafic pendant que Blender demarre encore.
+
+    Separation deliberee des roles : /health sert la sonde de vie — redemarrer
+    le pod parce que Blender est tombe serait excessif, supervisord le releve
+    — et /health/ready sert la disponibilite, qui elle doit retenir le trafic.
+    """
+    detail = {
+        "service": "blender-mcp",
+        "multi_user": MULTI_USER_MODE,
+        "sessions": len(_sessions),
+    }
+
+    if not MULTI_USER_MODE:
+        try:
+            async with httpx.AsyncClient() as client:
+                reponse = await client.get(
+                    f"http://{MONO_HOST}:{MONO_API_PORT}/health", timeout=5.0
+                )
+            amont = reponse.json()
+            pret = reponse.status_code == 200 and amont.get("blender") == "running"
+            detail["blender"] = amont.get("blender", "inconnu")
+        except Exception as e:
+            pret = False
+            detail["blender"] = f"injoignable: {type(e).__name__}"
+    else:
+        # En mode passerelle il n'y a pas d'instance unique : ce qui doit
+        # repondre, c'est le pilotage des containers.
+        pret = container_manager.docker_client is not None
+        detail["docker"] = "connecte" if pret else "indisponible"
+        detail["containers"] = len(container_manager.sessions)
+
+    detail["status"] = "ready" if pret else "not-ready"
+    return JSONResponse(content=detail, status_code=200 if pret else 503)
+
+
 # =============================================================================
 # MAIN
 # =============================================================================

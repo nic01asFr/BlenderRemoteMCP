@@ -105,19 +105,25 @@ spec:
             - name: tmp
               mountPath: /tmp
           startupProbe:
-            # Blender met une bonne minute a etre pret. Tant que cette sonde
-            # n'a pas reussi, les deux autres ne sont pas evaluees.
+            # /health/ready descend jusqu'a Blender. Mesure sur le cluster :
+            # le pont repond 11 s apres le demarrage du pod ; la marge de
+            # 300 s couvre un noeud charge.
             httpGet:
-              path: /health
+              path: /health/ready
               port: 8100
             periodSeconds: 10
             failureThreshold: 30
           readinessProbe:
+            # Retenir le trafic tant que Blender ne repond pas. /health seul
+            # rendrait le pod disponible des que uvicorn ecoute.
             httpGet:
-              path: /health
+              path: /health/ready
               port: 8100
             periodSeconds: 15
           livenessProbe:
+            # Sonde de vie volontairement superficielle : si Blender tombe,
+            # supervisord le releve dans le container ; redemarrer le pod
+            # entier serait disproportionne et risquerait la boucle.
             httpGet:
               path: /health
               port: 8100

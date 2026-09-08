@@ -237,3 +237,19 @@ def test_sante_annonce_le_mode(client):
     assert d["status"] == "ok"
     assert isinstance(d["multi_user"], bool)
     assert d["protocolVersion"] == main_mcp.PROTOCOL_VERSION
+
+
+def test_disponibilite_distincte_de_la_vie(client, monkeypatch):
+    """/health dit que le serveur repond, /health/ready que Blender repond."""
+    monkeypatch.setattr(main_mcp, "MULTI_USER_MODE", True)
+    monkeypatch.setattr(main_mcp.container_manager, "docker_client", None)
+    r = client.get("/health/ready")
+    assert r.status_code == 503
+    assert r.json()["status"] == "not-ready"
+    # la sonde de vie, elle, reste satisfaite : inutile de tuer le pod
+    assert client.get("/health").status_code == 200
+
+    monkeypatch.setattr(main_mcp.container_manager, "docker_client", object())
+    r = client.get("/health/ready")
+    assert r.status_code == 200
+    assert r.json()["status"] == "ready"
