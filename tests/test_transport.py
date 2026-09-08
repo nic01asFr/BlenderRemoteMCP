@@ -321,3 +321,75 @@ def test_canvas_pose_le_cookie_du_websocket(client, cle, monkeypatch):
     entete = r.headers.get("set-cookie", "")
     assert "httponly" in entete.lower(), "le jeton doit rester hors de portee du JavaScript"
     assert "samesite=strict" in entete.lower()
+
+
+# ── Cles scopees ─────────────────────────────────────────────────────────────
+#
+# Une cle maitresse identifie une personne, une cle scopee identifie un agent.
+# Sans elles, une cle qui fuit oblige a tout faire tourner, et on ne peut
+# confier a un participant d'atelier qu'un pouvoir complet — dont
+# execute_python, c'est-a-dire l'execution de code dans le container.
+
+def _maitre(cle):
+    return {"Authorization": f"Bearer {cle}", "Content-Type": "application/json"}
+
+
+def test_cle_scopee_ne_voit_que_ses_outils(client, cle):
+    r = client.post("/api/keys", headers=_maitre(cle),
+                    json={"label": "lecture seule", "tools": ["list_objects", "get_scene_info"]})
+    assert r.status_code == 200
+    sk = r.json()["api_key"]
+    assert sk.startswith("blender_sk_")
+
+    outils = client.post("/mcp", headers=_maitre(sk),
+                         json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
+                         ).json()["result"]["tools"]
+    assert {o["name"] for o in outils} == {"list_objects", "get_scene_info"}
+
+
+def test_cle_scopee_refusee_sur_un_outil_hors_portee(client, cle):
+    sk = client.post("/api/keys", headers=_maitre(cle),
+                     json={"tools": ["list_objects"]}).json()["api_key"]
+    r = client.post("/mcp", headers=_maitre(sk),
+                    json={"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                          "params": {"name": "execute_python", "arguments": {"code": "pass"}}})
+    assert r.status_code == 200
+    assert "hors de la portee" in r.json()["error"]["message"]
+
+
+def test_cle_scopee_ne_peut_pas_emettre_de_cle(client, cle):
+    """Sans cela, une cle restreinte se delivrerait une cle complete."""
+    sk = client.post("/api/keys", headers=_maitre(cle), json={"tools": ["list_objects"]}).json()["api_key"]
+    assert client.post("/api/keys", headers=_maitre(sk), json={}).status_code == 403
+    assert client.get("/api/keys", headers=_maitre(sk)).status_code == 403
+
+
+def test_revocation_immediate(client, cle):
+    sk = client.post("/api/keys", headers=_maitre(cle), json={"label": "jetable"}).json()["api_key"]
+    assert client.post("/mcp", headers=_maitre(sk),
+                       json={"jsonrpc": "2.0", "id": 3, "method": "tools/list", "params": {}}
+                       ).status_code == 200
+
+    ident = next(k["id"] for k in client.get("/api/keys", headers=_maitre(cle)).json()["keys"]
+                 if k["label"] == "jetable")
+    assert client.delete(f"/api/keys/{ident}", headers=_maitre(cle)).status_code == 204
+    assert client.post("/mcp", headers=_maitre(sk),
+                       json={"jsonrpc": "2.0", "id": 4, "method": "tools/list", "params": {}}
+                       ).status_code == 401
+
+
+def test_outil_inconnu_refuse_a_l_emission(client, cle):
+    r = client.post("/api/keys", headers=_maitre(cle), json={"tools": ["outil_qui_n_existe_pas"]})
+    assert r.status_code == 400
+    assert "inconnus" in r.json()["detail"]
+
+
+def test_cle_expiree_ne_vaut_plus_rien(client, cle):
+    import main_mcp as m
+    sk = client.post("/api/keys", headers=_maitre(cle),
+                     json={"label": "courte", "ttl_seconds": 3600}).json()["api_key"]
+    from datetime import datetime, timedelta
+    m.auth_manager.scoped[sk]["expires_at"] = (datetime.now() - timedelta(seconds=1)).isoformat()
+    assert client.post("/mcp", headers=_maitre(sk),
+                       json={"jsonrpc": "2.0", "id": 5, "method": "tools/list", "params": {}}
+                       ).status_code == 401

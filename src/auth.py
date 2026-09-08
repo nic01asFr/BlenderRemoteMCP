@@ -24,6 +24,15 @@ JWT_SECRET = os.environ.get("JWT_SECRET", "change-this-in-production-use-env-var
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRATION_HOURS = 24
 
+# Prefixe des cles scopees, distinct de celui des cles maitresses : on doit
+# pouvoir dire au premier coup d'oeil, dans un journal ou une capture, de
+# quel type de cle on parle.
+SCOPED_PREFIX = "blender_sk_"
+
+# "all" vaut liste blanche complete. Une liste vide n'autorise rien : le
+# defaut sur une valeur absente doit fermer, pas ouvrir.
+TOUS_LES_OUTILS = "all"
+
 
 class User(BaseModel):
     """User model"""
@@ -67,6 +76,9 @@ class AuthManager:
         self.users: Dict[str, User] = {}
         self.api_keys: Dict[str, str] = {}  # api_key -> user_id
         self.emails: Dict[str, str] = {}    # email -> user_id
+        # cle scopee -> {user_id, label, tools, created_at, expires_at,
+        #               revoked_at, parent}
+        self.scoped: Dict[str, dict] = {}
 
         # Load existing data
         self._load_data()
@@ -91,7 +103,12 @@ class AuthManager:
                     self.api_keys[user.api_key] = user.id
                     self.emails[user.email] = user.id
 
-                logger.info(f"Loaded {len(self.users)} users from {AUTH_DATA_FILE}")
+                self.scoped = data.get("scoped_keys", {})
+
+                logger.info(
+                    f"Loaded {len(self.users)} users and "
+                    f"{len(self.scoped)} scoped keys from {AUTH_DATA_FILE}"
+                )
         except Exception as e:
             logger.warning(f"Could not load auth data: {e}")
 
@@ -112,7 +129,8 @@ class AuthManager:
                         "last_login": user.last_login.isoformat() if user.last_login else None
                     }
                     for user in self.users.values()
-                ]
+                ],
+                "scoped_keys": self.scoped,
             }
 
             with open(AUTH_DATA_FILE, 'w') as f:
@@ -257,6 +275,109 @@ class AuthManager:
         """Get a user by ID"""
         return self.users.get(user_id)
 
+    # ── Cles scopees ─────────────────────────────────────────────────────
+    #
+    # Une cle maitresse identifie une personne ; une cle scopee identifie un
+    # agent. L'interet n'est pas theorique : sans elles, une cle qui fuit
+    # oblige a tout faire tourner, et il n'existe aucun moyen de confier a un
+    # participant d'atelier autre chose qu'un pouvoir complet — dont
+    # execute_python, c'est-a-dire l'execution de code dans le container.
+
+    async def create_scoped_key(
+        self,
+        user_id: str,
+        label: str = "",
+        tools=TOUS_LES_OUTILS,
+        ttl_seconds: Optional[int] = None,
+    ) -> dict:
+        """Emet une cle scopee derivee de la cle maitresse d'un utilisateur."""
+        user = self.users.get(user_id)
+        if not user:
+            raise ValueError("User not found")
+
+        cle = f"{SCOPED_PREFIX}{user_id[:8]}_{secrets.token_urlsafe(24)}"
+        maintenant = datetime.now()
+        entree = {
+            "user_id": user_id,
+            # parent : trace la cle dont celle-ci derive, pour l'audit et pour
+            # une revocation en cascade le jour ou la maitresse tourne.
+            "parent": user.api_key,
+            "label": label,
+            "tools": tools if isinstance(tools, list) else TOUS_LES_OUTILS,
+            "created_at": maintenant.isoformat(),
+            "expires_at": (
+                (maintenant + timedelta(seconds=ttl_seconds)).isoformat()
+                if ttl_seconds else None
+            ),
+            "revoked_at": None,
+        }
+        self.scoped[cle] = entree
+        self._save_data()
+        logger.info(f"Scoped key issued for {user_id[:8]} (label={label!r})")
+        return {"api_key": cle, **entree}
+
+    async def verify_scoped_key(self, key: str) -> Optional[tuple]:
+        """Valide une cle scopee. Retourne (User, portee) ou None.
+
+        Une cle revoquee ou expiree est traitee comme inexistante : le porteur
+        n'a pas a savoir laquelle des deux.
+        """
+        entree = self.scoped.get(key)
+        if not entree or entree.get("revoked_at"):
+            return None
+
+        expiration = entree.get("expires_at")
+        if expiration and datetime.fromisoformat(expiration) < datetime.now():
+            return None
+
+        user = self.users.get(entree["user_id"])
+        if not user:
+            return None
+        return user, entree
+
+    async def list_scoped_keys(self, user_id: str) -> list:
+        """Cles scopees d'un utilisateur. La cle elle-meme n'est jamais
+        renvoyee en clair : seulement de quoi l'identifier et la revoquer."""
+        resultat = []
+        for cle, e in self.scoped.items():
+            if e["user_id"] != user_id:
+                continue
+            resultat.append({
+                "id": cle[-12:],
+                "prefixe": cle[:len(SCOPED_PREFIX) + 8],
+                "label": e.get("label", ""),
+                "tools": e.get("tools"),
+                "created_at": e.get("created_at"),
+                "expires_at": e.get("expires_at"),
+                "revoked_at": e.get("revoked_at"),
+            })
+        return resultat
+
+    async def revoke_scoped_key(self, user_id: str, key_id: str) -> bool:
+        """Revoque une cle par son identifiant court. Marque plutot que
+        supprime : l'historique d'emission reste lisible."""
+        for cle, e in self.scoped.items():
+            if e["user_id"] == user_id and cle.endswith(key_id) and not e.get("revoked_at"):
+                e["revoked_at"] = datetime.now().isoformat()
+                self._save_data()
+                logger.info(f"Scoped key revoked for {user_id[:8]} ({key_id})")
+                return True
+        return False
+
+    async def revoke_derived_keys(self, parent_key: str) -> int:
+        """Revoque toutes les cles derivees d'une cle maitresse. Appele quand
+        la maitresse tourne : sinon les filles lui survivraient."""
+        n = 0
+        maintenant = datetime.now().isoformat()
+        for e in self.scoped.values():
+            if e.get("parent") == parent_key and not e.get("revoked_at"):
+                e["revoked_at"] = maintenant
+                n += 1
+        if n:
+            self._save_data()
+            logger.info(f"{n} derived key(s) revoked with their parent")
+        return n
+
     async def regenerate_api_key(self, user_id: str) -> str:
         """Regenerate API key for a user"""
         user = self.users.get(user_id)
@@ -267,6 +388,9 @@ class AuthManager:
         old_key = user.api_key
         if old_key in self.api_keys:
             del self.api_keys[old_key]
+
+        # Les cles derivees ne doivent pas survivre a leur parent.
+        await self.revoke_derived_keys(old_key)
 
         # Generate new key
         new_key = self._generate_api_key()

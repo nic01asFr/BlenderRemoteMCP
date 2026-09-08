@@ -43,7 +43,8 @@ import uuid
 import websockets
 
 from src.container_manager import ContainerManager
-from src.auth import AuthManager, UserCreate, UserLogin, TokenResponse
+from src.auth import (AuthManager, UserCreate, UserLogin, TokenResponse,
+                      SCOPED_PREFIX, TOUS_LES_OUTILS)
 
 # Configuration
 logging.basicConfig(level=logging.INFO)
@@ -1452,7 +1453,8 @@ MCP_TOOLS = {
 }
 
 
-async def handle_mcp_request(body: dict, user_id: str, session_id: str = "") -> dict:
+async def handle_mcp_request(body: dict, user_id: str, session_id: str = "",
+                             portee=None) -> dict:
     """Traite un message JSON-RPC MCP deja decode.
 
     Le decodage et le cadrage du transport sont faits par mcp_handler : cette
@@ -1499,9 +1501,12 @@ async def handle_mcp_request(body: dict, user_id: str, session_id: str = "") -> 
 
     # List tools
     if method == "tools/list":
+        # Filtrer plutot que refuser a l'appel : un agent ne doit pas voir
+        # des outils qu'il ne peut pas utiliser, sinon il les tentera.
         tools = [
             {"name": name, "description": info["description"], "inputSchema": info["inputSchema"]}
             for name, info in MCP_TOOLS.items()
+            if _outil_autorise(name, portee)
         ]
         return {
             "jsonrpc": "2.0",
@@ -1519,6 +1524,18 @@ async def handle_mcp_request(body: dict, user_id: str, session_id: str = "") -> 
                 "jsonrpc": "2.0",
                 "id": req_id,
                 "error": {"code": -32601, "message": f"Unknown tool: {tool_name}"}
+            }
+
+        # Le filtrage de tools/list ne suffit pas : rien n'empeche un client
+        # d'appeler un nom qu'il n'a pas vu.
+        if not _outil_autorise(tool_name, portee):
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "error": {
+                    "code": -32000,
+                    "message": f"Outil hors de la portee de cette cle : {tool_name}",
+                }
             }
 
         # Execute tool
@@ -1756,12 +1773,39 @@ def _erreur_auth(message: str) -> JSONResponse:
     )
 
 
+async def _resoudre_cle(jeton: str):
+    """Resout un jeton, maitre ou scope. Retourne (User, portee).
+
+    La portee vaut None pour une cle maitresse — pouvoir complet — et le
+    dictionnaire de la cle scopee sinon. Un seul point de resolution, pour
+    qu'aucune route ne puisse oublier de tenir compte de la portee.
+    """
+    if not jeton:
+        return None, None
+    if jeton.startswith(SCOPED_PREFIX):
+        resultat = await auth_manager.verify_scoped_key(jeton)
+        return resultat if resultat else (None, None)
+    return await auth_manager.verify_api_key(jeton), None
+
+
+def _outil_autorise(nom: str, portee) -> bool:
+    """Une cle maitresse peut tout ; une cle scopee, sa liste blanche."""
+    if portee is None:
+        return True
+    outils = portee.get("tools", TOUS_LES_OUTILS)
+    if outils == TOUS_LES_OUTILS:
+        return True
+    return nom in (outils or [])
+
+
 async def _utilisateur_de_la_requete(request: Request):
-    """Resout l'utilisateur porteur, ou None."""
+    """Resout l'utilisateur porteur, ou None. Ignore la portee : les routes
+    web n'exposent pas d'outils."""
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
         return None
-    return await auth_manager.verify_api_key(auth_header[7:].strip())
+    user, _ = await _resoudre_cle(auth_header[7:].strip())
+    return user
 
 
 @app.api_route("/mcp", methods=["GET", "POST", "DELETE", "OPTIONS"])
@@ -1797,7 +1841,9 @@ async def mcp_handler(request: Request):
             "sessionsActives": len(_sessions),
         }
 
-    user = await _utilisateur_de_la_requete(request)
+    entete_auth = request.headers.get("Authorization", "")
+    jeton = entete_auth[7:].strip() if entete_auth.startswith("Bearer ") else ""
+    user, portee = await _resoudre_cle(jeton)
     if user is None:
         return _erreur_auth(
             "Authentification requise : en-tete 'Authorization: Bearer VOTRE_CLE'."
@@ -1887,7 +1933,7 @@ async def mcp_handler(request: Request):
             logger.info(f"Pre-demarrage de Blender pour {user.id[:8]}")
         return Response(status_code=202, headers={"mcp-session-id": session_id})
 
-    reponse = await handle_mcp_request(body, user.id, session_id)
+    reponse = await handle_mcp_request(body, user.id, session_id, portee)
     if reponse is None:
         return Response(status_code=202, headers={"mcp-session-id": session_id})
 
@@ -1907,6 +1953,79 @@ async def register(data: UserCreate):
         return await auth_manager.register(data)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# =============================================================================
+# CLES SCOPEES
+# =============================================================================
+#
+# Une cle maitresse identifie une personne, une cle scopee identifie un agent.
+# Seule la maitresse peut en emettre : autrement une cle restreinte se
+# delivrerait elle-meme une cle complete, et la restriction ne vaudrait rien.
+
+
+async def _porteur_maitre(request: Request):
+    """Exige une cle MAITRESSE. Retourne l'utilisateur, ou leve 401/403."""
+    entete = request.headers.get("Authorization", "")
+    jeton = entete[7:].strip() if entete.startswith("Bearer ") else ""
+    user, portee = await _resoudre_cle(jeton)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentification requise")
+    if portee is not None:
+        raise HTTPException(
+            status_code=403,
+            detail="Une cle scopee ne peut pas gerer les cles. Utiliser la cle maitresse.",
+        )
+    return user
+
+
+@app.post("/api/keys")
+async def creer_cle_scopee(request: Request):
+    """Emet une cle scopee.
+
+    Corps : {"label": "...", "tools": ["nom", ...] | "all", "ttl_seconds": 3600}
+
+    La cle en clair n'est renvoyee QU'ICI : elle n'est plus jamais reaffichee
+    par la suite, seulement identifiee par ses douze derniers caracteres.
+    """
+    user = await _porteur_maitre(request)
+    try:
+        corps = await request.json()
+    except Exception:
+        corps = {}
+
+    outils = corps.get("tools", TOUS_LES_OUTILS)
+    if isinstance(outils, list):
+        inconnus = [o for o in outils if o not in MCP_TOOLS]
+        if inconnus:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Outils inconnus : {', '.join(inconnus)}",
+            )
+
+    resultat = await auth_manager.create_scoped_key(
+        user.id,
+        label=corps.get("label", ""),
+        tools=outils,
+        ttl_seconds=corps.get("ttl_seconds"),
+    )
+    return resultat
+
+
+@app.get("/api/keys")
+async def lister_cles_scopees(request: Request):
+    """Liste les cles scopees. Les cles en clair ne sont jamais renvoyees."""
+    user = await _porteur_maitre(request)
+    return {"keys": await auth_manager.list_scoped_keys(user.id)}
+
+
+@app.delete("/api/keys/{key_id}")
+async def revoquer_cle_scopee(key_id: str, request: Request):
+    """Revoque une cle par ses douze derniers caracteres."""
+    user = await _porteur_maitre(request)
+    if not await auth_manager.revoke_scoped_key(user.id, key_id):
+        raise HTTPException(status_code=404, detail="Cle introuvable ou deja revoquee")
+    return Response(status_code=204)
 
 
 @app.post("/api/auth/login", response_model=TokenResponse)
