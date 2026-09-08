@@ -84,11 +84,14 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Add CORS middleware
+# CORS. Le couple allow_origins=["*"] + allow_credentials=True est refuse
+# par les navigateurs et ouvre inutilement la surface : les identifiants ne
+# sont acceptes que si des origines sont explicitement declarees.
+_cors_origins = [o.strip() for o in os.environ.get("CORS_ORIGINS", "").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_cors_origins or ["*"],
+    allow_credentials=bool(_cors_origins),
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -1676,7 +1679,7 @@ async def stream(user_id: str):
             try:
                 async with client.stream(
                     "GET",
-                    f"http://localhost:{session.stream_port}/stream",
+                    f"http://{container_manager.host_address}:{session.stream_port}/stream",
                     timeout=None
                 ) as response:
                     async for chunk in response.aiter_bytes():

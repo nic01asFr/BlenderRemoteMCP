@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 AUTH_DATA_FILE = os.environ.get("AUTH_DATA_FILE", "data/auth.json")
 
 # Secret key for JWT (should be in environment variable in production)
-JWT_SECRET = "change-this-in-production-use-env-var"
+JWT_SECRET = os.environ.get("JWT_SECRET", "change-this-in-production-use-env-var")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRATION_HOURS = 24
 
