@@ -147,7 +147,10 @@ def _sse_response(payload: dict, session_id: str) -> Response:
 async def lifespan(app: FastAPI):
     """Application lifespan - startup and shutdown"""
     logger.info("Starting Blender MCP Server...")
-    await container_manager.initialize()
+    if MULTI_USER_MODE:
+        await container_manager.initialize()
+    else:
+        logger.info("Mode mono-utilisateur : instance Blender locale, pas de Docker")
     logger.info("=" * 50)
     logger.info("Server ready at http://localhost:8000")
     logger.info("MCP endpoint: http://localhost:8000/mcp")
@@ -207,8 +210,52 @@ else:
 # MCP IMPLEMENTATION
 # =============================================================================
 
+# =============================================================================
+# MODES MONO ET MULTI-UTILISATEUR
+# =============================================================================
+#
+# MULTI_USER_MODE=true  : une passerelle qui demarre un container par
+#                         utilisateur authentifie, via le socket Docker de
+#                         l'hote. C'est le mode historique, hors pod.
+# MULTI_USER_MODE=false : une seule instance Blender, dans le MEME container
+#                         que ce serveur. C'est le mode deployable sur un pod
+#                         Onyxia, ou il n'y a pas de demon Docker.
+#
+# Le mode ne touche PAS a l'authentification, requise dans les deux cas : il
+# regle l'isolation des donnees, pas l'acces au service. Plusieurs agents
+# peuvent travailler en parallele dans les deux modes, chacun avec sa session.
+
+MULTI_USER_MODE: bool = os.environ.get("MULTI_USER_MODE", "true").lower() == "true"
+
+# Ports de l'instance locale en mode mono, tels que les expose supervisord.
+MONO_HOST = os.environ.get("BLENDER_HOST", "localhost")
+MONO_API_PORT = int(os.environ.get("BLENDER_API_PORT", "8080"))
+MONO_STREAM_PORT = int(os.environ.get("BLENDER_STREAM_PORT", "8081"))
+MONO_NOVNC_PORT = int(os.environ.get("BLENDER_NOVNC_PORT", "6080"))
+
+
+def _points_d_acces(user_id: str):
+    """Ou joindre l'instance Blender de cet utilisateur.
+
+    Retourne (hote, port_api, port_flux, port_novnc), ou leve si le mode multi
+    n'a pas de session prete.
+    """
+    if not MULTI_USER_MODE:
+        return MONO_HOST, MONO_API_PORT, MONO_STREAM_PORT, MONO_NOVNC_PORT
+
+    session = container_manager.get_session(user_id)
+    if not session:
+        raise Exception("Aucune session active")
+    return (container_manager.host_address,
+            session.api_port, session.stream_port, session.novnc_port)
+
+
 async def _ensure_session(user_id: str):
     """Ensure user has an active Blender container"""
+    if not MULTI_USER_MODE:
+        # L'instance est locale et demarree par supervisord : rien a allouer.
+        return None
+
     session = container_manager.get_session(user_id)
 
     if not session:
@@ -230,8 +277,21 @@ async def _ensure_session(user_id: str):
 
 
 async def _call_blender(user_id: str, endpoint: str, method: str = "GET", data: dict = None):
-    """Call Blender API on user's container"""
-    session = await _ensure_session(user_id)
+    """Appelle l'API de l'instance Blender de cet utilisateur."""
+    if not MULTI_USER_MODE:
+        url = f"http://{MONO_HOST}:{MONO_API_PORT}{endpoint}"
+        async with httpx.AsyncClient() as client:
+            reponse = await client.request(method, url, json=data, timeout=180.0)
+            if reponse.status_code >= 400:
+                try:
+                    corps = reponse.json()
+                    detail = corps.get("detail", corps.get("error", reponse.status_code))
+                except Exception:
+                    detail = f"HTTP {reponse.status_code}"
+                raise Exception(f"Blender API error: {detail}")
+            return reponse.json()
+
+    await _ensure_session(user_id)
     return await container_manager.execute_on_container(user_id, endpoint, method, data)
 
 
@@ -1865,8 +1925,9 @@ async def login(data: UserLogin):
 @app.get("/stream/{user_id}")
 async def stream(user_id: str):
     """MJPEG stream from user's Blender container"""
-    session = container_manager.get_session(user_id)
-    if not session:
+    try:
+        hote, _, port_flux, _ = _points_d_acces(user_id)
+    except Exception:
         raise HTTPException(status_code=404, detail="No active session")
 
     async def generate():
@@ -1874,7 +1935,7 @@ async def stream(user_id: str):
             try:
                 async with client.stream(
                     "GET",
-                    f"http://{container_manager.host_address}:{session.stream_port}/stream",
+                    f"http://{hote}:{port_flux}/stream",
                     timeout=None
                 ) as response:
                     async for chunk in response.aiter_bytes():
@@ -1898,9 +1959,10 @@ async def vnc_websocket_proxy(websocket: WebSocket, user_id: str):
     WebSocket proxy to user's VNC server (via websockify).
     Enables direct browser connection to Blender viewport.
     """
-    # Verify user has active session
-    session = container_manager.get_session(user_id)
-    if not session:
+    # L'instance doit etre joignable avant d'accepter la connexion
+    try:
+        hote, _, _, port_novnc = _points_d_acces(user_id)
+    except Exception:
         await websocket.close(code=4004)
         return
 
@@ -1909,7 +1971,7 @@ async def vnc_websocket_proxy(websocket: WebSocket, user_id: str):
     # Connect to container's websockify (noVNC WebSocket bridge)
     # websockify runs on port 6080 inside container, mapped to novnc_port
     # Use host_address (host.docker.internal) when running in Docker
-    vnc_ws_url = f"ws://{container_manager.host_address}:{session.novnc_port}/websockify"
+    vnc_ws_url = f"ws://{hote}:{port_novnc}/websockify"
 
     try:
         async with websockets.connect(
@@ -2067,6 +2129,17 @@ async def session_info(request: Request, token: str = None):
     user = await _get_user_from_token(auth_token)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid token")
+
+    if not MULTI_USER_MODE:
+        hote, port_api, port_flux, port_novnc = _points_d_acces(user.id)
+        return {
+            "mode": "mono",
+            "user_id": user.id,
+            "api_url": f"http://{hote}:{port_api}",
+            "stream_url": f"http://{hote}:{port_flux}/stream",
+            "novnc_url": f"http://{hote}:{port_novnc}/vnc.html",
+            "status": "ready",
+        }
 
     session = container_manager.get_session(user.id)
     if not session:
@@ -2282,7 +2355,13 @@ async def home(request: Request):
 @app.get("/health")
 async def health():
     """Health check endpoint"""
-    return {"status": "ok", "service": "blender-mcp"}
+    return {
+        "status": "ok",
+        "service": "blender-mcp",
+        "multi_user": MULTI_USER_MODE,
+        "protocolVersion": PROTOCOL_VERSION,
+        "sessions": len(_sessions),
+    }
 
 
 # =============================================================================

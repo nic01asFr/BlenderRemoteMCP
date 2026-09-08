@@ -214,3 +214,26 @@ def test_les_sessions_inactives_sont_oubliees(client, cle):
     main_mcp._sessions[session_id]["last_seen"] -= main_mcp.SESSION_IDLE_SECONDS + 1
     assert main_mcp._evict_idle_sessions() == 1
     assert session_id not in main_mcp._sessions
+
+
+# ── Mode mono-utilisateur ────────────────────────────────────────────────────
+
+def test_mode_mono_resout_l_instance_locale(monkeypatch):
+    """En mono, l'instance est jointe sur localhost sans passer par Docker."""
+    monkeypatch.setattr(main_mcp, "MULTI_USER_MODE", False)
+    hote, api, flux, novnc = main_mcp._points_d_acces("peu-importe")
+    assert (hote, api, flux, novnc) == ("localhost", 8080, 8081, 6080)
+
+
+def test_mode_multi_sans_session_leve(monkeypatch):
+    monkeypatch.setattr(main_mcp, "MULTI_USER_MODE", True)
+    monkeypatch.setattr(main_mcp.container_manager, "get_session", lambda uid: None)
+    with pytest.raises(Exception, match="Aucune session active"):
+        main_mcp._points_d_acces("inconnu")
+
+
+def test_sante_annonce_le_mode(client):
+    d = client.get("/health").json()
+    assert d["status"] == "ok"
+    assert isinstance(d["multi_user"], bool)
+    assert d["protocolVersion"] == main_mcp.PROTOCOL_VERSION
