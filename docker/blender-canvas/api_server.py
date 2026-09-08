@@ -14,11 +14,19 @@ import json
 import os
 import base64
 import socket
+import struct
 
 app = FastAPI(title="Blender Container API")
 
 # Socket path for communication with Blender addon
 BLENDER_SOCKET = "/tmp/blender_api.sock"
+
+# Cadrage du protocole du pont : 4 octets big-endian de longueur, puis JSON.
+# Doit rester aligne avec blender_addon.py.
+HEADER_FORMAT = ">I"
+HEADER_SIZE = 4
+MAX_MESSAGE_BYTES = 64 * 1024 * 1024
+SOCKET_TIMEOUT = 180.0
 
 
 class ExecuteRequest(BaseModel):
@@ -53,26 +61,54 @@ class LoadRequest(BaseModel):
     blend_data: Optional[str] = None  # Base64 encoded
 
 
+def _recv_exactly(sock, n: int):
+    """Lit exactement n octets, ou None si la connexion se ferme avant."""
+    buf = b""
+    while len(buf) < n:
+        chunk = sock.recv(n - len(buf))
+        if not chunk:
+            return None
+        buf += chunk
+    return buf
+
+
 def send_to_blender(command: dict) -> dict:
-    """Send command to Blender via Unix socket"""
+    """Envoie une commande a l'addon Blender via le socket Unix.
+
+    Cadrage en longueur prefixee : l'ancien delimiteur newline dependait de
+    l'echappement JSON pour ne pas couper une charge utile au mauvais endroit,
+    et ne survivait pas a une reponse volumineuse (capture d'ecran base64).
+    """
+    sock = None
     try:
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(SOCKET_TIMEOUT)
         sock.connect(BLENDER_SOCKET)
-        sock.sendall(json.dumps(command).encode() + b'\n')
 
-        response = b''
-        while True:
-            chunk = sock.recv(4096)
-            if not chunk:
-                break
-            response += chunk
-            if b'\n' in chunk:
-                break
+        payload = json.dumps(command).encode("utf-8")
+        sock.sendall(struct.pack(HEADER_FORMAT, len(payload)) + payload)
 
-        sock.close()
-        return json.loads(response.decode().strip())
+        header = _recv_exactly(sock, HEADER_SIZE)
+        if header is None:
+            return {"success": False, "error": "Connexion fermee par Blender avant reponse"}
+        (length,) = struct.unpack(HEADER_FORMAT, header)
+        if length <= 0 or length > MAX_MESSAGE_BYTES:
+            return {"success": False, "error": f"Taille de reponse invalide : {length}"}
+
+        body = _recv_exactly(sock, length)
+        if body is None:
+            return {"success": False, "error": "Reponse tronquee"}
+        return json.loads(body.decode("utf-8"))
+    except socket.timeout:
+        return {"success": False, "error": f"Timeout apres {SOCKET_TIMEOUT}s"}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": f"{type(e).__name__}: {e}"}
+    finally:
+        if sock is not None:
+            try:
+                sock.close()
+            except Exception:
+                pass
 
 
 @app.get("/health")

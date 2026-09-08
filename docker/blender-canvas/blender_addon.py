@@ -1,20 +1,70 @@
 #!/usr/bin/env python3
 """
 Blender Addon - Socket API Server
-Runs inside Blender to handle commands via Unix socket
+Runs inside Blender to handle commands via Unix socket.
+
+Le socket ecoute dans un thread secondaire, mais les commandes sont executees
+sur le THREAD PRINCIPAL de Blender via bpy.app.timers : bpy n'est pas
+thread-safe, et appeler bpy.ops depuis un thread secondaire corrompt l'etat ou
+fait planter le process.
+
+Protocole : entete de 4 octets big-endian portant la longueur, puis charge
+utile JSON UTF-8. Le socket n'est jamais expose hors du container.
 """
 
 import bpy
 import socket
 import os
 import json
+import queue
+import struct
 import threading
+import time
+import traceback
 import base64
 import tempfile
 import math
 import subprocess
 
+try:
+    import mathutils
+except ImportError:
+    mathutils = None
+
 SOCKET_PATH = "/tmp/blender_api.sock"
+
+HEADER_FORMAT = ">I"
+HEADER_SIZE = 4
+MAX_MESSAGE_BYTES = 64 * 1024 * 1024   # les captures base64 peuvent peser
+POLL_INTERVAL = 0.05                   # secondes entre deux passes du timer
+MAX_PER_TICK = 10                      # commandes traitees par passe
+DEFAULT_TIMEOUT = 120.0                # secondes d'attente d'une reponse
+
+
+def _serialize(obj):
+    """Convertit les types Blender en valeurs serialisables en JSON.
+
+    Remplace l'ancien repli `str(obj)` sur tout objet portant __dict__, qui
+    transformait un Vector en chaine illisible. Les types mathematiques de
+    Blender (Vector, Matrix, Euler, Quaternion, Color) exposent to_list() ou
+    to_tuple() et deviennent donc de vraies listes.
+    """
+    if obj is None or isinstance(obj, (str, int, float, bool)):
+        return obj
+    if isinstance(obj, (list, tuple)):
+        return [_serialize(x) for x in obj]
+    if isinstance(obj, dict):
+        return {str(k): _serialize(v) for k, v in obj.items()}
+    if hasattr(obj, "to_list"):
+        return obj.to_list()
+    if hasattr(obj, "to_tuple"):
+        return list(obj.to_tuple())
+    if hasattr(obj, "__iter__"):
+        try:
+            return [_serialize(x) for x in obj]
+        except Exception:
+            return str(obj)
+    return str(obj)
 
 
 class BlenderAPIHandler:
@@ -263,21 +313,21 @@ class BlenderAPIHandler:
     def execute_code(self, cmd):
         code = cmd.get("code", "")
 
-        # Create namespace for execution
+        # Namespace d'execution. mathutils est fourni quand il est disponible :
+        # sans lui, impossible d'ecrire une transformation vectorielle.
         namespace = {"bpy": bpy, "result": None}
+        if mathutils is not None:
+            namespace["mathutils"] = mathutils
 
         try:
             exec(code, namespace)
-            result = namespace.get("result")
-
-            # Convert result to JSON-serializable format
-            if result is not None:
-                if hasattr(result, '__dict__'):
-                    result = str(result)
-
-            return {"success": True, "result": result}
+            return {"success": True, "result": _serialize(namespace.get("result"))}
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            return {
+                "success": False,
+                "error": f"{type(e).__name__}: {e}",
+                "traceback": traceback.format_exc(),
+            }
 
     def save_project(self, cmd):
         filepath = cmd.get("filepath", "/projects/current.blend")
@@ -491,68 +541,196 @@ class BlenderAPIHandler:
             return {"success": False, "error": str(e)}
 
 
-class SocketServer:
-    """Unix socket server for receiving commands"""
+# =============================================================================
+#  EXECUTION SUR LE THREAD PRINCIPAL
+# =============================================================================
+#
+# Le thread du socket ne touche jamais a bpy : il depose la commande dans
+# _request_queue et attend la reponse sur une file dediee a sa requete. Un
+# timer Blender consomme la file sur le thread principal.
+#
+# Effet de bord utile : "ping" traverse le meme chemin, donc /health ne
+# confirme pas seulement que le socket ecoute, mais que la boucle principale
+# de Blender repond encore.
 
-    def __init__(self, socket_path):
+_request_queue = queue.Queue()
+_response_queues = {}          # request_id -> queue.Queue()
+_handler = None                # BlenderAPIHandler, instancie au register()
+_running = False
+
+
+def _poll_queue():
+    """Callback de timer : execute les commandes en attente sur le main thread."""
+    if not _running:
+        return None            # retourner None desenregistre le timer
+
+    processed = 0
+    while processed < MAX_PER_TICK:
+        try:
+            req_id, command = _request_queue.get_nowait()
+        except queue.Empty:
+            break
+
+        try:
+            response = _handler.handle_command(command)
+        except Exception as e:
+            response = {
+                "success": False,
+                "error": f"{type(e).__name__}: {e}",
+                "traceback": traceback.format_exc(),
+            }
+
+        resp_q = _response_queues.pop(req_id, None)
+        if resp_q is not None:
+            resp_q.put(response)
+        processed += 1
+
+    return POLL_INTERVAL
+
+
+# =============================================================================
+#  CADRAGE DES MESSAGES
+# =============================================================================
+
+def _recv_exactly(sock, n):
+    """Lit exactement n octets, ou None si la connexion se ferme avant."""
+    buf = b""
+    while len(buf) < n:
+        chunk = sock.recv(n - len(buf))
+        if not chunk:
+            return None
+        buf += chunk
+    return buf
+
+
+def _recv_message(sock):
+    """Lit un message cadre. Retourne None si le pair a ferme proprement."""
+    header = _recv_exactly(sock, HEADER_SIZE)
+    if header is None:
+        return None
+    (length,) = struct.unpack(HEADER_FORMAT, header)
+    if length <= 0 or length > MAX_MESSAGE_BYTES:
+        raise ValueError(f"Taille de message invalide : {length}")
+    payload = _recv_exactly(sock, length)
+    if payload is None:
+        return None
+    return json.loads(payload.decode("utf-8"))
+
+
+def _send_message(sock, obj):
+    payload = json.dumps(obj).encode("utf-8")
+    sock.sendall(struct.pack(HEADER_FORMAT, len(payload)) + payload)
+
+
+# =============================================================================
+#  SERVEUR SOCKET
+# =============================================================================
+
+class SocketServer:
+    """Serveur Unix socket. Ne touche jamais a bpy : il ne fait que mettre en
+    file et attendre la reponse produite par le thread principal."""
+
+    def __init__(self, socket_path, family=None):
+        # family n'est renseigne QUE par les tests : sur un hote sans AF_UNIX
+        # ils se rabattent sur une boucle locale TCP pour exercer le cadrage et
+        # la file. La production passe toujours par register(), donc AF_UNIX.
         self.socket_path = socket_path
-        self.handler = BlenderAPIHandler()
-        self.running = False
+        self.family = family if family is not None else socket.AF_UNIX
+        self.address = None
         self.server_socket = None
+        self._ready = threading.Event()
+        self._next_id = 0
+        self._id_lock = threading.Lock()
+
+    def _new_request_id(self) -> str:
+        with self._id_lock:
+            self._next_id += 1
+            return f"r{self._next_id}"
 
     def start(self):
-        """Start the socket server"""
-        # Remove existing socket
-        if os.path.exists(self.socket_path):
-            os.remove(self.socket_path)
+        if self.family == socket.AF_INET:
+            self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.server_socket.bind(("127.0.0.1", 0))
+            self.address = self.server_socket.getsockname()
+        else:
+            if os.path.exists(self.socket_path):
+                os.remove(self.socket_path)
+            self.server_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            self.server_socket.bind(self.socket_path)
+            self.address = self.socket_path
 
-        self.server_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.server_socket.bind(self.socket_path)
-        self.server_socket.listen(5)
+        self.server_socket.listen(8)
         self.server_socket.settimeout(1.0)
-        self.running = True
+        self._ready.set()
 
-        print(f"Blender API listening on {self.socket_path}")
+        print(f"Blender API listening on {self.address}", flush=True)
 
-        while self.running:
+        while _running:
             try:
                 client, _ = self.server_socket.accept()
-                self.handle_client(client)
             except socket.timeout:
                 continue
+            except OSError:
+                break
             except Exception as e:
-                if self.running:
-                    print(f"Socket error: {e}")
+                if _running:
+                    print(f"Socket error: {e}", flush=True)
+                continue
+
+            threading.Thread(
+                target=self.handle_client, args=(client,), daemon=True
+            ).start()
 
     def handle_client(self, client):
-        """Handle a single client connection"""
+        """Une connexion peut porter plusieurs commandes a la suite."""
         try:
-            data = b''
-            while True:
-                chunk = client.recv(4096)
-                if not chunk:
-                    break
-                data += chunk
-                if b'\n' in chunk:
+            client.settimeout(None)
+            while _running:
+                command = _recv_message(client)
+                if command is None:
                     break
 
-            if data:
-                command = json.loads(data.decode().strip())
-                response = self.handler.handle_command(command)
-                client.sendall(json.dumps(response).encode() + b'\n')
+                timeout = float(command.get("timeout", DEFAULT_TIMEOUT))
+                req_id = self._new_request_id()
+                resp_q = queue.Queue(maxsize=1)
+                _response_queues[req_id] = resp_q
+                _request_queue.put((req_id, command))
+
+                try:
+                    response = resp_q.get(timeout=timeout)
+                except queue.Empty:
+                    _response_queues.pop(req_id, None)
+                    response = {
+                        "success": False,
+                        "error": (
+                            f"Timeout apres {timeout}s : le thread principal de "
+                            f"Blender n'a pas traite la commande"
+                        ),
+                    }
+
+                _send_message(client, response)
         except Exception as e:
-            error_response = {"success": False, "error": str(e)}
-            client.sendall(json.dumps(error_response).encode() + b'\n')
+            try:
+                _send_message(client, {"success": False, "error": str(e)})
+            except Exception:
+                pass
         finally:
-            client.close()
+            try:
+                client.close()
+            except Exception:
+                pass
 
     def stop(self):
-        """Stop the socket server"""
-        self.running = False
         if self.server_socket:
-            self.server_socket.close()
+            try:
+                self.server_socket.close()
+            except Exception:
+                pass
         if os.path.exists(self.socket_path):
-            os.remove(self.socket_path)
+            try:
+                os.remove(self.socket_path)
+            except Exception:
+                pass
 
 
 # Global server instance
@@ -560,7 +738,7 @@ server = None
 
 
 def start_server():
-    """Start the socket server in a background thread"""
+    """Demarre le serveur socket dans un thread secondaire."""
     global server
     server = SocketServer(SOCKET_PATH)
     server_thread = threading.Thread(target=server.start, daemon=True)
@@ -569,16 +747,26 @@ def start_server():
 
 def register():
     """Register the addon"""
+    global _handler, _running
+    _handler = BlenderAPIHandler()
+    _running = True
+    bpy.app.timers.register(_poll_queue, first_interval=POLL_INTERVAL, persistent=True)
     start_server()
-    print("Blender API Server started")
+    print("Blender API Server started (execution sur le thread principal)", flush=True)
 
 
 def unregister():
     """Unregister the addon"""
-    global server
+    global _running
+    _running = False
+    try:
+        if bpy.app.timers.is_registered(_poll_queue):
+            bpy.app.timers.unregister(_poll_queue)
+    except Exception:
+        pass
     if server:
         server.stop()
-    print("Blender API Server stopped")
+    print("Blender API Server stopped", flush=True)
 
 
 if __name__ == "__main__":
