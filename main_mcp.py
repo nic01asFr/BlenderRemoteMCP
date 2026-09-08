@@ -34,9 +34,12 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 import uvicorn
 import httpx
+import json
 import logging
 import os
 import asyncio
+import time
+import uuid
 import websockets
 
 from src.container_manager import ContainerManager
@@ -57,6 +60,89 @@ auth_manager = AuthManager()
 _autosave_tasks = {}
 
 
+# =============================================================================
+# SESSIONS MCP
+# =============================================================================
+#
+# Une session n'est PAS un utilisateur. Plusieurs agents peuvent ouvrir chacun
+# leur session sur le meme utilisateur, donc sur la meme instance Blender, et y
+# travailler en parallele : c'est ce que le transport Streamable HTTP rend
+# possible et que l'ancien POST sans session interdisait.
+#
+# L'etat se repartit en trois etages, deliberement distincts :
+#   - global et immuable : partage par toutes les sessions ;
+#   - par instance Blender : la scene et le projet, qui vivent dans le
+#     container et sont donc partages entre les sessions du meme utilisateur ;
+#   - par session MCP : ce dictionnaire, purement une vue. Une session qui
+#     disparait ne doit rien modifier de l'instance.
+
+PROTOCOL_VERSION = "2025-06-18"
+SUPPORTED_PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
+SESSION_IDLE_SECONDS = 3600
+
+# session_id -> {"user_id", "created_at", "last_seen", "client", "protocol"}
+_sessions: dict = {}
+
+# Methodes qui supposent une session deja initialisee.
+_STATEFUL_METHODS = frozenset({
+    "tools/list", "tools/call",
+    "resources/list", "resources/read",
+    "prompts/list", "prompts/get",
+})
+
+
+def _touch_session(session_id: str, user_id: str, **champs) -> dict:
+    """Cree ou rafraichit une session."""
+    session = _sessions.get(session_id)
+    if session is None:
+        session = {
+            "user_id": user_id,
+            "created_at": time.time(),
+            "client": None,
+            "protocol": PROTOCOL_VERSION,
+        }
+        _sessions[session_id] = session
+    session["last_seen"] = time.time()
+    session.update({k: v for k, v in champs.items() if v is not None})
+    return session
+
+
+def _evict_idle_sessions() -> int:
+    """Oublie les sessions inactives. Ne touche a aucun container : l'instance
+    Blender a son propre cycle de vie, gere par container_manager."""
+    limite = time.time() - SESSION_IDLE_SECONDS
+    perimees = [sid for sid, s in _sessions.items() if s["last_seen"] < limite]
+    for sid in perimees:
+        _sessions.pop(sid, None)
+    return len(perimees)
+
+
+def _accepts_sse(accept_header: str) -> bool:
+    """Vrai si le client accepte text/event-stream.
+
+    Analyse les types un a un : une comparaison par sous-chaine ferait passer
+    'text/event-stream-autre-chose' pour un flux SSE.
+    """
+    for partie in (accept_header or "").split(","):
+        if partie.split(";")[0].strip().lower() == "text/event-stream":
+            return True
+    return False
+
+
+def _sse_response(payload: dict, session_id: str) -> Response:
+    """Reponse SSE a evenement unique, forme attendue par Streamable HTTP."""
+    return Response(
+        content=f"event: message\ndata: {json.dumps(payload)}\n\n",
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",   # sinon nginx accumule le flux
+            "mcp-session-id": session_id,
+        },
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan - startup and shutdown"""
@@ -67,9 +153,21 @@ async def lifespan(app: FastAPI):
     logger.info("MCP endpoint: http://localhost:8000/mcp")
     logger.info("=" * 50)
 
+    async def _concierge_sessions():
+        """Oublie les sessions MCP inactives. N'arrete aucun container : les
+        instances Blender ont leur propre cycle de vie."""
+        while True:
+            await asyncio.sleep(300)
+            oubliees = _evict_idle_sessions()
+            if oubliees:
+                logger.info(f"{oubliees} session(s) MCP inactive(s) oubliee(s)")
+
+    concierge = asyncio.create_task(_concierge_sessions())
+
     yield
 
     logger.info("Shutting down...")
+    concierge.cancel()
     # Cancel all autosave tasks
     for task in _autosave_tasks.values():
         task.cancel()
@@ -1294,31 +1392,40 @@ MCP_TOOLS = {
 }
 
 
-async def handle_mcp_request(request: Request, user_id: str) -> dict:
-    """Handle MCP JSON-RPC request"""
-    try:
-        body = await request.json()
-    except Exception:
-        return {"jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error"}, "id": None}
+async def handle_mcp_request(body: dict, user_id: str, session_id: str = "") -> dict:
+    """Traite un message JSON-RPC MCP deja decode.
 
+    Le decodage et le cadrage du transport sont faits par mcp_handler : cette
+    fonction ne connait que le protocole, pas le canal.
+    """
     method = body.get("method", "")
     params = body.get("params", {})
     req_id = body.get("id")
 
     # Initialize
     if method == "initialize":
+        # Negociation de version : on retient celle du client si on la parle,
+        # sinon on annonce la notre et c'est au client de s'aligner.
+        demandee = params.get("protocolVersion", "")
+        version = demandee if demandee in SUPPORTED_PROTOCOL_VERSIONS else PROTOCOL_VERSION
+        if session_id:
+            _touch_session(
+                session_id, user_id,
+                client=params.get("clientInfo"),
+                protocol=version,
+            )
         return {
             "jsonrpc": "2.0",
             "id": req_id,
             "result": {
-                "protocolVersion": "2024-11-05",
+                "protocolVersion": version,
                 "capabilities": {
-                    "tools": {},
-                    "resources": {}
+                    "tools": {"listChanged": False},
+                    "resources": {"subscribe": False, "listChanged": False},
                 },
                 "serverInfo": {
-                    "name": "Blender",
-                    "version": "1.0.0"
+                    "name": "BlenderRemoteMCP",
+                    "version": "2.0.0"
                 }
             }
         }
@@ -1582,63 +1689,151 @@ async def handle_mcp_request(request: Request, user_id: str) -> dict:
 # MCP ENDPOINT
 # =============================================================================
 
-@app.api_route("/mcp", methods=["GET", "POST", "OPTIONS"])
-@app.api_route("/mcp/", methods=["GET", "POST", "OPTIONS"])
+def _erreur_auth(message: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=401,
+        content={"jsonrpc": "2.0", "error": {"code": -32000, "message": message}, "id": None},
+    )
+
+
+async def _utilisateur_de_la_requete(request: Request):
+    """Resout l'utilisateur porteur, ou None."""
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return None
+    return await auth_manager.verify_api_key(auth_header[7:].strip())
+
+
+@app.api_route("/mcp", methods=["GET", "POST", "DELETE", "OPTIONS"])
+@app.api_route("/mcp/", methods=["GET", "POST", "DELETE", "OPTIONS"])
 async def mcp_handler(request: Request):
+    """Point d'entree MCP, transport Streamable HTTP.
+
+    POST porte les messages JSON-RPC. La reponse part en SSE si le client
+    l'accepte, en JSON simple sinon : les proxys du type mcp-remote n'annoncent
+    pas text/event-stream et ne savent pas lire un flux.
+
+    GET sert deux usages : sans Accept SSE il renvoie les metadonnees du
+    serveur, avec Accept SSE il ouvre le transport historique 2024-11-05 en
+    annoncant ou poster.
+
+    DELETE ferme la session.
     """
-    Main MCP endpoint. Handles JSON-RPC requests.
-    Requires Authorization: Bearer <api_key> header.
-    """
-    # Handle OPTIONS for CORS
     if request.method == "OPTIONS":
         return Response(status_code=204)
 
-    # GET returns server info
-    if request.method == "GET":
+    accepte_sse = _accepts_sse(request.headers.get("accept", ""))
+
+    # ── GET sans SSE : metadonnees publiques ─────────────────────────────
+    if request.method == "GET" and not accepte_sse:
         return {
-            "name": "Blender",
-            "version": "1.0.0",
-            "description": "Cloud Blender access via MCP",
-            "protocol": "MCP 2024-11-05",
-            "authentication": "Bearer token in Authorization header"
+            "name": "BlenderRemoteMCP",
+            "version": "2.0.0",
+            "description": "Blender en service, accessible par MCP",
+            "protocolVersion": PROTOCOL_VERSION,
+            "supportedProtocolVersions": list(SUPPORTED_PROTOCOL_VERSIONS),
+            "transport": "streamable-http",
+            "authentication": "Bearer token dans l'en-tete Authorization",
+            "sessionsActives": len(_sessions),
         }
 
-    # POST handles MCP requests
-    auth_header = request.headers.get("Authorization", "")
-
-    if not auth_header.startswith("Bearer "):
-        return JSONResponse(
-            status_code=401,
-            content={
-                "jsonrpc": "2.0",
-                "error": {
-                    "code": -32000,
-                    "message": "Authorization required. Use 'Authorization: Bearer YOUR_API_KEY' header."
-                },
-                "id": None
-            }
+    user = await _utilisateur_de_la_requete(request)
+    if user is None:
+        return _erreur_auth(
+            "Authentification requise : en-tete 'Authorization: Bearer VOTRE_CLE'."
         )
 
-    api_key = auth_header[7:]  # Remove "Bearer "
-    user = await auth_manager.verify_api_key(api_key)
+    # ── GET avec SSE : transport historique ──────────────────────────────
+    if request.method == "GET":
+        session_id = request.headers.get("mcp-session-id") or uuid.uuid4().hex
+        _touch_session(session_id, user.id)
 
-    if not user:
-        return JSONResponse(
-            status_code=401,
-            content={
-                "jsonrpc": "2.0",
-                "error": {"code": -32000, "message": "Invalid API key"},
-                "id": None
-            }
+        async def flux_historique():
+            # Annonce ou poster les requetes, puis maintient le lien ouvert.
+            yield "event: endpoint\ndata: /mcp\n\n"
+            while True:
+                await asyncio.sleep(30)
+                yield ": keepalive\n\n"
+
+        return StreamingResponse(
+            flux_historique(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+                "mcp-session-id": session_id,
+            },
         )
 
-    # Handle MCP request
-    response = await handle_mcp_request(request, user.id)
-
-    if response is None:
+    # ── DELETE : fermeture de session ────────────────────────────────────
+    if request.method == "DELETE":
+        session_id = request.headers.get("mcp-session-id", "")
+        session = _sessions.get(session_id)
+        if session and session["user_id"] == user.id:
+            _sessions.pop(session_id, None)
+            logger.info(f"Session MCP fermee : {session_id[:8]}")
+        # Fermer une session ne touche pas au container : d'autres sessions
+        # du meme utilisateur peuvent encore travailler sur l'instance.
         return Response(status_code=204)
 
-    return JSONResponse(content=response)
+    # ── POST : messages JSON-RPC ─────────────────────────────────────────
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(
+            status_code=400,
+            content={"jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error"}, "id": None},
+        )
+
+    if isinstance(body, list):
+        return JSONResponse(
+            status_code=400,
+            content={
+                "jsonrpc": "2.0", "id": None,
+                "error": {"code": -32600, "message": "Les lots de requetes ne sont pas supportes"},
+            },
+        )
+
+    entete_session = request.headers.get("mcp-session-id", "")
+    session_id = entete_session or uuid.uuid4().hex
+    method = body.get("method", "")
+    req_id = body.get("id")
+
+    # Validation indulgente : on ne refuse que si le client a explicitement
+    # presente une session que l'on ne connait pas. Un client sans session
+    # reste accepte, sinon les proxys sans gestion de session sont exclus.
+    if (_sessions and entete_session and entete_session not in _sessions
+            and method in _STATEFUL_METHODS and req_id is not None):
+        return JSONResponse(
+            status_code=400,
+            headers={"mcp-session-id": entete_session},
+            content={
+                "jsonrpc": "2.0", "id": req_id,
+                "error": {
+                    "code": -32600,
+                    "message": "Session inconnue ou expiree. Envoyer 'initialize' d'abord.",
+                },
+            },
+        )
+
+    _touch_session(session_id, user.id)
+
+    # Notifications : pas d'identifiant, donc pas de reponse. 202 et non 204,
+    # pour que le client sache que le message a bien ete accepte.
+    if req_id is None:
+        if method == "notifications/initialized":
+            asyncio.create_task(_ensure_session(user.id))
+            logger.info(f"Pre-demarrage de Blender pour {user.id[:8]}")
+        return Response(status_code=202, headers={"mcp-session-id": session_id})
+
+    reponse = await handle_mcp_request(body, user.id, session_id)
+    if reponse is None:
+        return Response(status_code=202, headers={"mcp-session-id": session_id})
+
+    if accepte_sse:
+        return _sse_response(reponse, session_id)
+    return JSONResponse(content=reponse, headers={"mcp-session-id": session_id})
 
 
 # =============================================================================
