@@ -1439,7 +1439,7 @@ MCP_TOOLS = {
     },
     "get_canvas_url": {
         "description": (
-            "Return the URL of the interactive Blender web canvas (noVNC GUI). "
+            "Return the URL of the interactive Blender desktop (full GUI in the browser). "
             "Always share this link with the user so they can open the live Blender UI "
             "in their browser. Prefer this over describing the UI only in text."
         ),
@@ -1534,27 +1534,34 @@ def _public_base_url(request: Request = None, base_url: str = "") -> str:
     return "http://localhost:8100"
 
 
-def _canvas_url(base_url: str, api_key: str) -> str:
+def _canvas_url(base_url: str, api_key: str, *, embed: bool = False) -> str:
+    """URL canonique du bureau immersif (/desktop). /canvas reste un alias HTTP."""
     base = (base_url or "http://localhost:8100").rstrip("/")
-    if not api_key:
-        return f"{base}/canvas"
-    return f"{base}/canvas?token={api_key}"
+    path = f"{base}/desktop"
+    params = []
+    if api_key:
+        params.append(f"token={api_key}")
+    if embed:
+        params.append("embed=1")
+    if not params:
+        return path
+    return f"{path}?{'&'.join(params)}"
 
 
 def _mcp_instructions(base_url: str) -> str:
     """Texte injecte au client LLM a l'initialize (pattern QgisRemoteMCP)."""
     base = (base_url or "http://localhost:8100").rstrip("/")
     return (
-        "You control a live Blender 4.0 instance (GUI on Xvfb, reachable via noVNC).\n"
+        "You control a live Blender 4.0 instance (full GUI in the browser).\n"
         "\n"
         "## Web UI — give this link to the user\n"
-        "There is an interactive browser canvas (full Blender GUI). "
+        "There is an interactive desktop (full Blender GUI in the browser). "
         "Call **get_canvas_url** and share the returned URL with the user "
         "whenever they want to see the scene, validate visually, or work in the GUI. "
         "Do this proactively after meaningful scene changes, not only if asked.\n"
         "If the client supports MCP Apps, call **blender_desktop_ui** to open the "
         "inline Blender view in the conversation.\n"
-        f"Canvas base path: `{base}/canvas?token=<API key from the MCP Bearer header>`.\n"
+        f"Desktop path: `{base}/desktop?token=<API key from the MCP Bearer header>`.\n"
         "\n"
         "## Recommended workflow\n"
         "1. Build / edit the scene with tools (`create_object`, materials, lighting, …).\n"
@@ -1563,7 +1570,7 @@ def _mcp_instructions(base_url: str) -> str:
         "4. Optional: `send_keypress` / `send_click` to drive the GUI from the agent.\n"
         "\n"
         "## Notes\n"
-        "- Auth is required: the canvas URL embeds the same API key as the MCP Bearer token.\n"
+        "- Auth is required: the desktop URL embeds the same API key as the MCP Bearer token.\n"
         "- `execute_python` runs against live `bpy`; assign to `result` to return values.\n"
         "- On CPU-only hosts, prefer Cycles CPU + denoising via `configure_render`.\n"
     )
@@ -1803,7 +1810,7 @@ async def handle_mcp_request(body: dict, user_id: str, session_id: str = "",
             elif tool_name == "get_canvas_url":
                 url = _canvas_url(base, api_key)
                 result = (
-                    f"Interactive Blender canvas (share with the user):\n{url}\n\n"
+                    f"Blender desktop (share with the user):\n{url}\n\n"
                     "Open this URL in a browser to see and control the live Blender GUI."
                 )
             elif tool_name == "blender_desktop_ui":
@@ -1811,7 +1818,7 @@ async def handle_mcp_request(body: dict, user_id: str, session_id: str = "",
                 result = (
                     "Blender Desktop UI opened for hosts that support MCP Apps "
                     f"(resource ui://blenderremotemcp/desktop).\n"
-                    f"Fallback full canvas link for the user: {url}"
+                    f"Fallback full desktop link for the user: {url}"
                 )
             elif tool_name == "restart_blender":
                 result = await mcp_restart_blender(user_id)
@@ -1864,7 +1871,7 @@ async def handle_mcp_request(body: dict, user_id: str, session_id: str = "",
                     {
                         "uri": "ui://blenderremotemcp/desktop",
                         "name": "Blender Desktop",
-                        "description": "Interactive Blender Desktop — live viewport with link to full noVNC canvas.",
+                        "description": "Interactive Blender Desktop — live viewport with link to the full desktop.",
                         "mimeType": "text/html;profile=mcp-app",
                     },
                     {"uri": "blender://scene", "name": "Scene", "description": "Current scene state"},
@@ -1886,7 +1893,7 @@ async def handle_mcp_request(body: dict, user_id: str, session_id: str = "",
                 else:
                     html = (
                         f"<!DOCTYPE html><html><body>"
-                        f"<p>Open the Blender canvas: "
+                        f"<p>Ouvrir le bureau Blender : "
                         f"<a href=\"{canvas}\">{canvas}</a></p></body></html>"
                     )
                 # CSP : le host public pour open-link / eventuels assets.
@@ -2398,25 +2405,28 @@ async def _get_user_from_request(request: Request):
     return None
 
 
+@app.get("/desktop", response_class=HTMLResponse)
 @app.get("/canvas", response_class=HTMLResponse)
-async def canvas_page(request: Request, token: str = None):
+async def desktop_page(request: Request, token: str = None, embed: str = None):
+    """Bureau Blender immersif (plein viewport). /canvas est un alias de /desktop.
+
+    ``embed=1`` est réservé à un futur hub (même page, contrat d'iframe).
+    Auth via ``?token=`` ou cookie ``blender_token``.
     """
-    Pure Blender canvas page - full viewport, no chrome.
-    Auth via ?token= query param or blender_token cookie.
-    """
-    # Check token from query or cookie
+    _ = embed  # documenté pour le contrat hub ; pas de branche UI distincte en v1
     auth_token = token or request.cookies.get("blender_token")
 
     if not auth_token:
-        # Redirect to login or show error
         return HTMLResponse("""
-        <html>
-        <head><title>Blender Canvas - Auth Required</title></head>
-        <body style="background:#1a1a1a;color:#fff;font-family:sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;">
+        <html lang="fr">
+        <head><title>Bureau Blender — authentification</title></head>
+        <body style="background:#0d0d0d;color:#c8c8c8;font-family:system-ui,sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;">
             <div style="text-align:center;">
-                <h1>Authentication Required</h1>
-                <p>Add your API key: <code>/canvas?token=blender_xxx</code></p>
-                <p>Or <a href="/" style="color:#4af;">go to home</a> to register.</p>
+                <p>Authentification requise</p>
+                <p style="color:#888;font-size:14px;margin-top:12px;">
+                  Ouvre <code style="color:#e8e8e8;">/desktop?token=…</code>
+                  ou <a href="/" style="color:#ff6b35;">l’accueil</a> pour t’enregistrer.
+                </p>
             </div>
         </body>
         </html>
@@ -2425,30 +2435,28 @@ async def canvas_page(request: Request, token: str = None):
     user = await _get_user_from_token(auth_token)
     if not user:
         return HTMLResponse("""
-        <html>
-        <head><title>Blender Canvas - Invalid Token</title></head>
-        <body style="background:#1a1a1a;color:#fff;font-family:sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;">
+        <html lang="fr">
+        <head><title>Bureau Blender — jeton invalide</title></head>
+        <body style="background:#0d0d0d;color:#c8c8c8;font-family:system-ui,sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;">
             <div style="text-align:center;">
-                <h1>Invalid Token</h1>
-                <p>Your API key is invalid or expired.</p>
-                <p><a href="/" style="color:#4af;">Go to home</a> to get a new one.</p>
+                <p>Jeton invalide ou expiré</p>
+                <p style="margin-top:12px;"><a href="/" style="color:#ff6b35;">Retour à l’accueil</a></p>
             </div>
         </body>
         </html>
         """, status_code=401)
 
-    # Ensure user has a session
     try:
         session = await _ensure_session(user.id)
     except Exception as e:
         return HTMLResponse(f"""
-        <html>
-        <head><title>Blender Canvas - Error</title></head>
-        <body style="background:#1a1a1a;color:#fff;font-family:sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;">
+        <html lang="fr">
+        <head><title>Bureau Blender — erreur</title></head>
+        <body style="background:#0d0d0d;color:#c8c8c8;font-family:system-ui,sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;">
             <div style="text-align:center;">
-                <h1>Session Error</h1>
-                <p>Failed to start Blender: {e}</p>
-                <p><a href="/" style="color:#4af;">Try again</a></p>
+                <p>Impossible de démarrer la session</p>
+                <p style="color:#888;font-size:14px;margin-top:12px;">{e}</p>
+                <p style="margin-top:12px;"><a href="/" style="color:#ff6b35;">Réessayer</a></p>
             </div>
         </body>
         </html>
@@ -2463,7 +2471,7 @@ async def canvas_page(request: Request, token: str = None):
         "session": session.to_dict() if hasattr(session, 'to_dict') else {},
         "token": auth_token,
     })
-    # Le WebSocket du canvas s'authentifie par ce cookie : un navigateur ne
+    # Le WebSocket du bureau s'authentifie par ce cookie : un navigateur ne
     # peut pas poser d'en-tete Authorization sur une connexion WebSocket.
     # httponly : le jeton reste hors de portee du JavaScript de la page.
     reponse.set_cookie(
@@ -2492,6 +2500,7 @@ async def session_info(request: Request, token: str = None):
             "api_url": f"http://{hote}:{port_api}",
             "stream_url": f"http://{hote}:{port_flux}/stream",
             "novnc_url": f"http://{hote}:{port_novnc}/vnc.html",
+            "desktop_url": "/desktop",
             "status": "ready",
         }
 
@@ -2690,7 +2699,7 @@ else:
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
-    """Vitrine du service : identité, lien canvas, snippet MCP."""
+    """Vitrine du service : identité, lien bureau, snippet MCP."""
     base = _public_base_url(request)
     if templates:
         return templates.TemplateResponse(
@@ -2701,7 +2710,7 @@ async def home(request: Request):
     return HTMLResponse(
         f"<html><body><h1>BlenderRemoteMCP</h1>"
         f"<p>MCP: <code>{base}/mcp</code></p>"
-        f"<p>Canvas: <a href=\"{base}/canvas\">{base}/canvas</a></p>"
+        f"<p>Bureau: <a href=\"{base}/desktop\">{base}/desktop</a></p>"
         f"</body></html>"
     )
 

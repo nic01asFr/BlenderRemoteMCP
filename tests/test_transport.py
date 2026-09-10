@@ -114,13 +114,14 @@ def test_initialize_ouvre_une_session(client, cle):
 
 
 def test_initialize_porte_les_instructions_canvas(client, cle):
-    """Le client LLM doit apprendre l'existence du canvas web des l'init."""
+    """Le client LLM doit apprendre l'existence du bureau web des l'init."""
     r = _initialiser(client, cle)
     assert r.status_code == 200
     instructions = r.json()["result"].get("instructions", "")
     assert "get_canvas_url" in instructions
-    assert "/canvas" in instructions
+    assert "/desktop" in instructions
     assert "Blender" in instructions
+    assert "noVNC" not in instructions
 
 
 def test_get_canvas_url_renvoie_le_lien_avec_jeton(client, cle):
@@ -136,7 +137,7 @@ def test_get_canvas_url_renvoie_le_lien_avec_jeton(client, cle):
     )
     assert r2.status_code == 200
     texte = r2.json()["result"]["content"][0]["text"]
-    assert "/canvas?token=" in texte
+    assert "/desktop?token=" in texte
     assert cle in texte
     tools = client.post(
         "/mcp",
@@ -168,7 +169,7 @@ def test_resource_ui_desktop_est_une_mcp_app(client, cle):
     ).json()["result"]["contents"][0]
     assert read["mimeType"] == "text/html;profile=mcp-app"
     assert "mcp-app" in read["mimeType"]
-    assert "/canvas?token=" in read["text"]
+    assert "/desktop?token=" in read["text"]
     assert cle in read["text"]
 
 
@@ -328,11 +329,27 @@ def test_canvas_rend_la_page_en_mode_mono(client, cle, monkeypatch):
     r = client.get(f"/canvas?token={cle}")
     assert r.status_code == 200, r.text[:300]
     assert "/static/novnc/core/rfb.js" in r.text
+    assert "id=\"desktop\"" in r.text
+    assert "id=\"controls\"" not in r.text
+    assert "id=\"fullscreen-hint\"" not in r.text
+    assert "id=\"status-indicator\"" not in r.text
+    assert "noVNC" not in r.text
+    assert "Connecting to VNC" not in r.text
+
+
+def test_desktop_est_l_url_canonique(client, cle, monkeypatch):
+    monkeypatch.setattr(main_mcp, "MULTI_USER_MODE", False)
+    r = client.get(f"/desktop?token={cle}&embed=1")
+    assert r.status_code == 200, r.text[:300]
+    assert "/static/novnc/core/rfb.js" in r.text
+    assert "Démarrage" in r.text or "D&eacute;marrage" in r.text
 
 
 def test_accueil_rend_la_page(client):
     r = client.get("/")
     assert r.status_code == 200
+    assert "Ouvrir le bureau" in r.text
+    assert "noVNC" not in r.text
 
 
 # ── Authentification des canaux media ────────────────────────────────────────
@@ -370,10 +387,10 @@ def test_websocket_vnc_refuse_un_autre_utilisateur(client, cle):
 
 
 def test_canvas_pose_le_cookie_du_websocket(client, cle, monkeypatch):
-    """Sans ce cookie le canvas ne peut plus s'authentifier : un navigateur ne
+    """Sans ce cookie le bureau ne peut plus s'authentifier : un navigateur ne
     pose pas d'en-tete Authorization sur un WebSocket."""
     monkeypatch.setattr(main_mcp, "MULTI_USER_MODE", False)
-    r = client.get(f"/canvas?token={cle}")
+    r = client.get(f"/desktop?token={cle}")
     assert r.status_code == 200
     biscuit = r.cookies.get("blender_token")
     assert biscuit == cle

@@ -3,9 +3,9 @@
 - **Service** : [ouvrir /](https://{{ .Values.ingress.host }}/)
 - **Santé** : [GET /health](https://{{ .Values.ingress.host }}/health)
 {{- if .Values.mcpApiKey }}
-- **Canvas noVNC** : [ouvrir /canvas](https://{{ .Values.ingress.host }}/canvas?token={{ .Values.mcpApiKey }})
+- **Bureau Blender** : [ouvrir /desktop](https://{{ .Values.ingress.host }}/desktop?token={{ .Values.mcpApiKey }})
 {{- else }}
-- **Canvas noVNC** : `https://{{ .Values.ingress.host }}/canvas?token=<api_key>`
+- **Bureau Blender** : `https://{{ .Values.ingress.host }}/desktop?token=<api_key>`
 {{- end }}
 
 {{- if .Values.mcpApiKey }}
