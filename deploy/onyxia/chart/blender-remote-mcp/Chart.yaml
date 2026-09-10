@@ -1,0 +1,12 @@
+apiVersion: v2
+name: blender-remote-mcp
+description: BlenderRemoteMCP — Blender 4.0 + MCP Streamable HTTP (mode mono) sur SSPCloud/Onyxia
+type: application
+version: 0.1.1
+appVersion: "latest"
+keywords:
+  - blender
+  - mcp
+  - onyxia
+sources:
+  - https://github.com/nic01asFr/BlenderRemoteMCP

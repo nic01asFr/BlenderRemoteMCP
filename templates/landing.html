@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BlenderRemoteMCP</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg0: #0c0e12;
+      --bg1: #141821;
+      --line: #2a3142;
+      --text: #eef1f6;
+      --muted: #9aa3b5;
+      --accent: #ff6b35;
+      --accent-dim: rgba(255, 107, 53, 0.14);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100vh;
+      font-family: "IBM Plex Sans", system-ui, sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(1200px 600px at 10% -10%, var(--accent-dim), transparent 55%),
+        radial-gradient(900px 500px at 100% 0%, rgba(61, 214, 140, 0.08), transparent 50%),
+        linear-gradient(180deg, var(--bg0), var(--bg1) 45%, var(--bg0));
+    }
+    main {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 12vh 24px 64px;
+    }
+    .brand {
+      font-size: clamp(2.4rem, 6vw, 3.4rem);
+      font-weight: 600;
+      letter-spacing: -0.03em;
+      line-height: 1.05;
+      margin-bottom: 16px;
+    }
+    .brand span { color: var(--accent); }
+    .lead {
+      font-size: 1.1rem;
+      color: var(--muted);
+      max-width: 38rem;
+      line-height: 1.55;
+      margin-bottom: 28px;
+    }
+    .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 40px; }
+    a.btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 12px 18px; border-radius: 8px; text-decoration: none;
+      font-weight: 500; font-size: 0.95rem;
+    }
+    a.btn-primary { background: var(--accent); color: #111; }
+    a.btn-ghost { border: 1px solid var(--line); color: var(--text); }
+    a.btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+    section {
+      border-top: 1px solid var(--line);
+      padding-top: 28px;
+      margin-top: 8px;
+    }
+    h2 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 12px; }
+    pre, code { font-family: "IBM Plex Mono", ui-monospace, monospace; }
+    pre {
+      background: rgba(0,0,0,0.35);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 0.82rem;
+      line-height: 1.5;
+      color: #d7dbe6;
+    }
+    ul { list-style: none; display: grid; gap: 10px; margin-bottom: 28px; }
+    li {
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255,255,255,0.02);
+      font-size: 0.95rem;
+      color: var(--muted);
+    }
+    li strong { color: var(--text); font-weight: 500; }
+    footer { margin-top: 40px; font-size: 0.8rem; color: var(--muted); }
+    footer a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="brand">Blender<span>Remote</span>MCP</p>
+    <p class="lead">
+      Blender 4.0 dans le cloud, piloté par un agent via le Model Context Protocol.
+      Canvas noVNC live, outils scène / matériaux / rendu, déployable sur SSPCloud.
+    </p>
+    <div class="actions">
+      <a class="btn btn-primary" href="/canvas">Ouvrir le canvas</a>
+      <a class="btn btn-ghost" href="/health">Santé</a>
+      <a class="btn btn-ghost" href="/mcp">Endpoint MCP</a>
+    </div>
+
+    <section>
+      <h2>Connexion MCP</h2>
+      <pre>{
+  "mcpServers": {
+    "blender": {
+      "url": "{{ public_base }}/mcp",
+      "transport": "streamable-http",
+      "headers": {
+        "Authorization": "Bearer blender_…"
+      }
+    }
+  }
+}</pre>
+    </section>
+
+    <section>
+      <h2>À savoir</h2>
+      <ul>
+        <li><strong>get_canvas_url</strong> — lien GUI à donner à l’utilisateur</li>
+        <li><strong>blender_desktop_ui</strong> — vue inline (MCP Apps) si le client la supporte</li>
+        <li><strong>get_screenshot</strong> — capture X11 du viewport live</li>
+        <li>Auth requise partout (Bearer / cookie / <code>?token=</code>)</li>
+      </ul>
+    </section>
+
+    <footer>
+      Repo
+      <a href="https://github.com/nic01asFr/BlenderRemoteMCP">github.com/nic01asFr/BlenderRemoteMCP</a>
+      · health <a href="/health">/health</a>
+    </footer>
+  </main>
+</body>
+</html>

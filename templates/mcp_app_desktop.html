@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Blender Desktop — BlenderRemoteMCP</title>
+<style>
+  :root {
+    --bg: #12141a;
+    --panel: #1a1d27;
+    --line: #2a2f3d;
+    --text: #e8eaef;
+    --muted: #9aa3b5;
+    --accent: #ff6b35;
+    --ok: #3dd68c;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  .header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px; background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  .header h1 { font-size: 14px; font-weight: 600; letter-spacing: 0.02em; }
+  .status { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+  .dot.online { background: var(--ok); }
+  .toolbar {
+    display: flex; gap: 6px; padding: 8px 14px; background: var(--panel);
+    border-bottom: 1px solid var(--line); flex-wrap: wrap;
+  }
+  .toolbar button {
+    padding: 6px 12px; font-size: 12px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--text); border-radius: 6px; cursor: pointer;
+  }
+  .toolbar button:hover { border-color: var(--accent); color: var(--accent); }
+  .toolbar a {
+    padding: 6px 12px; font-size: 12px; border: 1px solid var(--accent);
+    background: transparent; color: var(--accent); border-radius: 6px;
+    text-decoration: none; display: inline-flex; align-items: center;
+  }
+  .toolbar a:hover { background: var(--accent); color: #111; }
+  .frame {
+    width: 100%; min-height: 280px; background: #0a0b0f;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .frame img { width: 100%; display: block; }
+  .hint {
+    padding: 10px 14px; font-size: 12px; color: var(--muted);
+    border-top: 1px solid var(--line); background: var(--panel);
+  }
+  .hint code { color: var(--text); }
+</style>
+</head>
+<body>
+  <div class="header">
+    <h1>Blender Desktop</h1>
+    <div class="status"><span class="dot" id="statusDot"></span><span id="statusText">Connecting…</span></div>
+  </div>
+  <div class="toolbar">
+    <button type="button" id="btnRefresh">Refresh view</button>
+    <a id="btnOpen" href="{{ canvas_url }}" target="_blank" rel="noopener">Open full canvas</a>
+  </div>
+  <div class="frame" id="frame">
+    <img id="liveImg" alt="Blender viewport" style="display:none">
+    <span id="placeholder" style="color:#9aa3b5;font-size:13px;padding:24px;text-align:center">
+      Waiting for first screenshot…
+    </span>
+  </div>
+  <div class="hint">
+    Interactive GUI: <code id="canvasHint">{{ canvas_url }}</code>
+    — share this link with the user. In-chat preview uses <code>get_screenshot</code>.
+  </div>
+<script>
+const CANVAS_URL = {{ canvas_url | tojson }};
+let mcpRequestId = 1;
+let mcpInitialized = false;
+const mcpPendingRequests = {};
+
+function initMcpApp() {
+  if (window.parent === window) {
+    document.getElementById('statusText').textContent = 'Standalone';
+    document.getElementById('statusDot').classList.add('online');
+    return;
+  }
+  window.addEventListener('message', handleMcpMessage);
+  window.parent.postMessage({
+    jsonrpc: '2.0', id: mcpRequestId++,
+    method: 'ui/initialize',
+    params: {
+      protocolVersion: '2026-01-26',
+      appInfo: { name: 'BlenderRemoteMCP', version: '2.0.0' },
+      appCapabilities: { tools: { listChanged: false }, availableDisplayModes: ['inline'] }
+    }
+  }, '*');
+}
+
+function handleMcpMessage(event) {
+  const data = event.data;
+  if (!data || data.jsonrpc !== '2.0') return;
+  if (data.id !== undefined && (data.result !== undefined || data.error !== undefined)) {
+    if (!mcpInitialized && data.result) {
+      mcpInitialized = true;
+      document.getElementById('statusDot').classList.add('online');
+      document.getElementById('statusText').textContent = 'Connected';
+      window.parent.postMessage({ jsonrpc: '2.0', method: 'ui/notifications/initialized', params: {} }, '*');
+      setupAutoResize();
+      refreshShot();
+    }
+    if (mcpPendingRequests[data.id]) {
+      if (data.error) mcpPendingRequests[data.id].reject(new Error(data.error.message || 'MCP error'));
+      else mcpPendingRequests[data.id].resolve(data.result);
+      delete mcpPendingRequests[data.id];
+    }
+  }
+}
+
+function setupAutoResize() {
+  let lastW = 0, lastH = 0;
+  function send() {
+    requestAnimationFrame(() => {
+      const w = Math.ceil(document.documentElement.scrollWidth);
+      const h = Math.ceil(document.documentElement.scrollHeight);
+      if (w !== lastW || h !== lastH) {
+        lastW = w; lastH = h;
+        window.parent.postMessage({
+          jsonrpc: '2.0', method: 'ui/notifications/size-changed',
+          params: { width: w, height: h }
+        }, '*');
+      }
+    });
+  }
+  send();
+  new ResizeObserver(send).observe(document.body);
+}
+
+function callTool(name, args) {
+  if (!mcpInitialized) return Promise.reject(new Error('Not connected'));
+  const id = mcpRequestId++;
+  return new Promise((resolve, reject) => {
+    mcpPendingRequests[id] = { resolve, reject };
+    window.parent.postMessage({
+      jsonrpc: '2.0', id, method: 'tools/call',
+      params: { name, arguments: args || {} }
+    }, '*');
+    setTimeout(() => {
+      if (mcpPendingRequests[id]) {
+        delete mcpPendingRequests[id];
+        reject(new Error('Timeout'));
+      }
+    }, 60000);
+  });
+}
+
+function openCanvas() {
+  if (mcpInitialized) {
+    window.parent.postMessage({
+      jsonrpc: '2.0', id: mcpRequestId++,
+      method: 'ui/open-link', params: { url: CANVAS_URL }
+    }, '*');
+  } else {
+    window.open(CANVAS_URL, '_blank', 'noopener');
+  }
+}
+
+async function refreshShot() {
+  const placeholder = document.getElementById('placeholder');
+  const img = document.getElementById('liveImg');
+  try {
+    if (mcpInitialized) {
+      const result = await callTool('get_screenshot', { width: 1280, height: 720 });
+      const block = (result && result.content || []).find(c => c.type === 'image');
+      if (block) {
+        img.src = 'data:' + (block.mimeType || 'image/png') + ';base64,' + block.data;
+        img.style.display = 'block';
+        placeholder.style.display = 'none';
+        return;
+      }
+    }
+    placeholder.textContent = 'Open full canvas for the live GUI, or retry Refresh.';
+  } catch (e) {
+    placeholder.textContent = 'Preview unavailable — use Open full canvas.';
+  }
+}
+
+document.getElementById('btnRefresh').addEventListener('click', refreshShot);
+document.getElementById('btnOpen').addEventListener('click', (e) => {
+  e.preventDefault();
+  openCanvas();
+});
+initMcpApp();
+</script>
+</body>
+</html>

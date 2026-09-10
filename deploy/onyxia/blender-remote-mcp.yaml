@@ -1,10 +1,11 @@
 # BlenderRemoteMCP sur SSPCloud / Onyxia — mode mono-utilisateur.
 #
-# Manifeste direct, applicable par kubectl. Le chart Helm viendra apres : il
-# est ce qui rend le service VISIBLE dans « Mes services » d'Onyxia, via le
-# Secret de metadonnees sh.onyxia.release.v1.<release>. Sans lui le service
-# tourne mais n'existe pas pour l'interface.
+# Manifeste direct, applicable par kubectl. Preferez le chart Helm :
+#   deploy/onyxia/chart/blender-remote-mcp
+# qui cree aussi le Secret sh.onyxia.release.v1.<release> pour « Mes services ».
 #
+#   helm upgrade --install blender-remote-mcp deploy/onyxia/chart/blender-remote-mcp
+#   # ou :
 #   kubectl apply -f deploy/onyxia/blender-remote-mcp.yaml
 #
 # Prerequis : l'image poussee sur ghcr.io/nic01asfr/blender-remote-mcp et le

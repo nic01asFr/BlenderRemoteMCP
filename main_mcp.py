@@ -515,7 +515,25 @@ else:
 async def mcp_undo(user_id: str) -> str:
     """Undo the last action in Blender."""
     try:
-        code = "import bpy; bpy.ops.ed.undo(); result = 'Undo performed'"
+        # bpy.ops.ed.undo exige un contexte (fenetre + VIEW_3D). Sans
+        # temp_override, l'appel echoue hors session interactive.
+        code = """
+import bpy
+result = None
+for window in bpy.context.window_manager.windows:
+    screen = window.screen
+    for area in screen.areas:
+        if area.type != 'VIEW_3D':
+            continue
+        with bpy.context.temp_override(window=window, screen=screen, area=area):
+            bpy.ops.ed.undo()
+        result = 'Undo performed'
+        break
+    if result:
+        break
+if result is None:
+    result = 'Error: no VIEW_3D context for undo'
+"""
         result = await _call_blender(user_id, "/api/execute", "POST", {"code": code})
         return result.get("result", "Undo performed")
     except Exception as e:
@@ -525,7 +543,23 @@ async def mcp_undo(user_id: str) -> str:
 async def mcp_redo(user_id: str) -> str:
     """Redo the last undone action in Blender."""
     try:
-        code = "import bpy; bpy.ops.ed.redo(); result = 'Redo performed'"
+        code = """
+import bpy
+result = None
+for window in bpy.context.window_manager.windows:
+    screen = window.screen
+    for area in screen.areas:
+        if area.type != 'VIEW_3D':
+            continue
+        with bpy.context.temp_override(window=window, screen=screen, area=area):
+            bpy.ops.ed.redo()
+        result = 'Redo performed'
+        break
+    if result:
+        break
+if result is None:
+    result = 'Error: no VIEW_3D context for redo'
+"""
         result = await _call_blender(user_id, "/api/execute", "POST", {"code": code})
         return result.get("result", "Redo performed")
     except Exception as e:
@@ -607,11 +641,12 @@ else:
 async def mcp_delete_collection(user_id: str, name: str, delete_objects: bool = False) -> str:
     """Delete a collection (optionally with its objects)."""
     try:
+        # repr(bool(...)) -> True/False Python, pas false/true JSON.
         code = f"""
 import bpy
 col = bpy.data.collections.get('{name}')
 if col:
-    if {str(delete_objects).lower()}:
+    if {repr(bool(delete_objects))}:
         for obj in list(col.objects):
             bpy.data.objects.remove(obj)
     bpy.data.collections.remove(col)
@@ -652,12 +687,12 @@ else:
 async def mcp_list_materials(user_id: str) -> str:
     """List all materials in the project."""
     try:
+        # ID.users est deja un int (compteur de references), pas une sequence.
         code = """
 import bpy
 materials = []
 for mat in bpy.data.materials:
-    users = len(mat.users) if hasattr(mat, 'users') else 0
-    materials.append({'name': mat.name, 'users': users})
+    materials.append({'name': mat.name, 'users': int(mat.users)})
 result = materials
 """
         result = await _call_blender(user_id, "/api/execute", "POST", {"code": code})
@@ -738,14 +773,17 @@ else:
 async def mcp_list_meshes(user_id: str) -> str:
     """List all mesh data in the project."""
     try:
+        # mesh.users est un int ; vertices/polygons restent des collections.
         code = """
 import bpy
 meshes = []
 for mesh in bpy.data.meshes:
-    users = len(mesh.users) if hasattr(mesh, 'users') else 0
-    verts = len(mesh.vertices)
-    faces = len(mesh.polygons)
-    meshes.append({'name': mesh.name, 'users': users, 'verts': verts, 'faces': faces})
+    meshes.append({
+        'name': mesh.name,
+        'users': int(mesh.users),
+        'verts': len(mesh.vertices),
+        'faces': len(mesh.polygons),
+    })
 result = meshes
 """
         result = await _call_blender(user_id, "/api/execute", "POST", {"code": code})
@@ -1386,7 +1424,10 @@ MCP_TOOLS = {
         }
     },
     "get_screenshot": {
-        "description": "Take a screenshot of the Blender viewport.",
+        "description": (
+            "Take a screenshot of the live Blender display (X11). "
+            "For interactive GUI access, call get_canvas_url and share the link with the user."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -1395,6 +1436,23 @@ MCP_TOOLS = {
             },
             "required": []
         }
+    },
+    "get_canvas_url": {
+        "description": (
+            "Return the URL of the interactive Blender web canvas (noVNC GUI). "
+            "Always share this link with the user so they can open the live Blender UI "
+            "in their browser. Prefer this over describing the UI only in text."
+        ),
+        "inputSchema": {"type": "object", "properties": {}, "required": []}
+    },
+    "blender_desktop_ui": {
+        "description": (
+            "Open the interactive Blender Desktop view in the conversation (MCP Apps). "
+            "Use when the user wants to see or interact with the scene visually. "
+            "Also share get_canvas_url for hosts without MCP Apps support."
+        ),
+        "inputSchema": {"type": "object", "properties": {}, "required": []},
+        "_meta": {"ui": {"resourceUri": "ui://blenderremotemcp/desktop"}},
     },
     "restart_blender": {
         "description": "Restart the Blender process. Use if Blender becomes unresponsive.",
@@ -1453,16 +1511,77 @@ MCP_TOOLS = {
 }
 
 
+def _public_base_url(request: Request = None, base_url: str = "") -> str:
+    """URL publique du service (canvas, MCP), sans slash final.
+
+    Priorite : argument explicite, PUBLIC_BASE_URL, en-tetes proxy, puis
+    request.url. Sans requete : localhost:8100 (compose).
+    """
+    if base_url:
+        return base_url.rstrip("/")
+    env = os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
+    if env:
+        return env
+    if request is not None:
+        proto = request.headers.get("x-forwarded-proto") or request.url.scheme or "https"
+        host = (
+            request.headers.get("x-forwarded-host")
+            or request.headers.get("host")
+            or request.url.netloc
+        )
+        if host:
+            return f"{proto}://{host}".rstrip("/")
+    return "http://localhost:8100"
+
+
+def _canvas_url(base_url: str, api_key: str) -> str:
+    base = (base_url or "http://localhost:8100").rstrip("/")
+    if not api_key:
+        return f"{base}/canvas"
+    return f"{base}/canvas?token={api_key}"
+
+
+def _mcp_instructions(base_url: str) -> str:
+    """Texte injecte au client LLM a l'initialize (pattern QgisRemoteMCP)."""
+    base = (base_url or "http://localhost:8100").rstrip("/")
+    return (
+        "You control a live Blender 4.0 instance (GUI on Xvfb, reachable via noVNC).\n"
+        "\n"
+        "## Web UI — give this link to the user\n"
+        "There is an interactive browser canvas (full Blender GUI). "
+        "Call **get_canvas_url** and share the returned URL with the user "
+        "whenever they want to see the scene, validate visually, or work in the GUI. "
+        "Do this proactively after meaningful scene changes, not only if asked.\n"
+        "If the client supports MCP Apps, call **blender_desktop_ui** to open the "
+        "inline Blender view in the conversation.\n"
+        f"Canvas base path: `{base}/canvas?token=<API key from the MCP Bearer header>`.\n"
+        "\n"
+        "## Recommended workflow\n"
+        "1. Build / edit the scene with tools (`create_object`, materials, lighting, …).\n"
+        "2. **get_screenshot** — verify in-chat (X11 capture of the live display).\n"
+        "3. **get_canvas_url** and/or **blender_desktop_ui** — give the user the live GUI.\n"
+        "4. Optional: `send_keypress` / `send_click` to drive the GUI from the agent.\n"
+        "\n"
+        "## Notes\n"
+        "- Auth is required: the canvas URL embeds the same API key as the MCP Bearer token.\n"
+        "- `execute_python` runs against live `bpy`; assign to `result` to return values.\n"
+        "- On CPU-only hosts, prefer Cycles CPU + denoising via `configure_render`.\n"
+    )
+
+
 async def handle_mcp_request(body: dict, user_id: str, session_id: str = "",
-                             portee=None) -> dict:
+                             portee=None, base_url: str = "",
+                             api_key: str = "") -> dict:
     """Traite un message JSON-RPC MCP deja decode.
 
     Le decodage et le cadrage du transport sont faits par mcp_handler : cette
     fonction ne connait que le protocole, pas le canal.
+    base_url / api_key servent aux instructions et a get_canvas_url.
     """
     method = body.get("method", "")
     params = body.get("params", {})
     req_id = body.get("id")
+    base = _public_base_url(base_url=base_url)
 
     # Initialize
     if method == "initialize":
@@ -1484,11 +1603,15 @@ async def handle_mcp_request(body: dict, user_id: str, session_id: str = "",
                 "capabilities": {
                     "tools": {"listChanged": False},
                     "resources": {"subscribe": False, "listChanged": False},
+                    "extensions": {
+                        "io.modelcontextprotocol/ui": {},
+                    },
                 },
                 "serverInfo": {
                     "name": "BlenderRemoteMCP",
                     "version": "2.0.0"
-                }
+                },
+                "instructions": _mcp_instructions(base),
             }
         }
 
@@ -1503,11 +1626,18 @@ async def handle_mcp_request(body: dict, user_id: str, session_id: str = "",
     if method == "tools/list":
         # Filtrer plutot que refuser a l'appel : un agent ne doit pas voir
         # des outils qu'il ne peut pas utiliser, sinon il les tentera.
-        tools = [
-            {"name": name, "description": info["description"], "inputSchema": info["inputSchema"]}
-            for name, info in MCP_TOOLS.items()
-            if _outil_autorise(name, portee)
-        ]
+        tools = []
+        for name, info in MCP_TOOLS.items():
+            if not _outil_autorise(name, portee):
+                continue
+            entry = {
+                "name": name,
+                "description": info["description"],
+                "inputSchema": info["inputSchema"],
+            }
+            if info.get("_meta"):
+                entry["_meta"] = info["_meta"]
+            tools.append(entry)
         return {
             "jsonrpc": "2.0",
             "id": req_id,
@@ -1670,6 +1800,19 @@ async def handle_mcp_request(body: dict, user_id: str, session_id: str = "",
                     result = screenshot_result.get("message", "Unknown error")
                 else:
                     result = str(screenshot_result)
+            elif tool_name == "get_canvas_url":
+                url = _canvas_url(base, api_key)
+                result = (
+                    f"Interactive Blender canvas (share with the user):\n{url}\n\n"
+                    "Open this URL in a browser to see and control the live Blender GUI."
+                )
+            elif tool_name == "blender_desktop_ui":
+                url = _canvas_url(base, api_key)
+                result = (
+                    "Blender Desktop UI opened for hosts that support MCP Apps "
+                    f"(resource ui://blenderremotemcp/desktop).\n"
+                    f"Fallback full canvas link for the user: {url}"
+                )
             elif tool_name == "restart_blender":
                 result = await mcp_restart_blender(user_id)
             elif tool_name == "detect_gpu":
@@ -1718,8 +1861,14 @@ async def handle_mcp_request(body: dict, user_id: str, session_id: str = "",
             "id": req_id,
             "result": {
                 "resources": [
+                    {
+                        "uri": "ui://blenderremotemcp/desktop",
+                        "name": "Blender Desktop",
+                        "description": "Interactive Blender Desktop — live viewport with link to full noVNC canvas.",
+                        "mimeType": "text/html;profile=mcp-app",
+                    },
                     {"uri": "blender://scene", "name": "Scene", "description": "Current scene state"},
-                    {"uri": "blender://projects", "name": "Projects", "description": "Saved projects"}
+                    {"uri": "blender://projects", "name": "Projects", "description": "Saved projects"},
                 ]
             }
         }
@@ -1728,6 +1877,40 @@ async def handle_mcp_request(body: dict, user_id: str, session_id: str = "",
     if method == "resources/read":
         uri = params.get("uri", "")
         try:
+            if uri == "ui://blenderremotemcp/desktop":
+                canvas = _canvas_url(base, api_key)
+                if templates:
+                    html = templates.get_template("mcp_app_desktop.html").render(
+                        canvas_url=canvas,
+                    )
+                else:
+                    html = (
+                        f"<!DOCTYPE html><html><body>"
+                        f"<p>Open the Blender canvas: "
+                        f"<a href=\"{canvas}\">{canvas}</a></p></body></html>"
+                    )
+                # CSP : le host public pour open-link / eventuels assets.
+                host_origin = base
+                return {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "result": {
+                        "contents": [{
+                            "uri": uri,
+                            "mimeType": "text/html;profile=mcp-app",
+                            "text": html,
+                            "_meta": {
+                                "ui": {
+                                    "csp": {
+                                        "connectDomains": ["self", host_origin],
+                                        "resourceDomains": ["self", host_origin],
+                                        "frameDomains": [host_origin],
+                                    }
+                                }
+                            },
+                        }]
+                    },
+                }
             if uri == "blender://scene":
                 objects = await _call_blender(user_id, "/api/objects")
                 content = {"objects": objects, "count": len(objects)}
@@ -1933,7 +2116,11 @@ async def mcp_handler(request: Request):
             logger.info(f"Pre-demarrage de Blender pour {user.id[:8]}")
         return Response(status_code=202, headers={"mcp-session-id": session_id})
 
-    reponse = await handle_mcp_request(body, user.id, session_id, portee)
+    reponse = await handle_mcp_request(
+        body, user.id, session_id, portee,
+        base_url=_public_base_url(request),
+        api_key=jeton,
+    )
     if reponse is None:
         return Response(status_code=202, headers={"mcp-session-id": session_id})
 
@@ -2503,20 +2690,20 @@ else:
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
-    """Web UI for registration and stream viewing"""
+    """Vitrine du service : identité, lien canvas, snippet MCP."""
+    base = _public_base_url(request)
     if templates:
-        return templates.TemplateResponse(request, "canvas.html", {})
-    return HTMLResponse("""
-    <html>
-    <head><title>Blender MCP Server</title></head>
-    <body>
-        <h1>Blender MCP Server</h1>
-        <p>MCP endpoint: <code>/mcp</code></p>
-        <p>Register: <code>POST /api/auth/register</code></p>
-        <p>Login: <code>POST /api/auth/login</code></p>
-    </body>
-    </html>
-    """)
+        return templates.TemplateResponse(
+            request,
+            "landing.html",
+            {"public_base": base},
+        )
+    return HTMLResponse(
+        f"<html><body><h1>BlenderRemoteMCP</h1>"
+        f"<p>MCP: <code>{base}/mcp</code></p>"
+        f"<p>Canvas: <a href=\"{base}/canvas\">{base}/canvas</a></p>"
+        f"</body></html>"
+    )
 
 
 @app.get("/health")

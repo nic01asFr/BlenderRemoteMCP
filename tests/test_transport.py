@@ -113,6 +113,65 @@ def test_initialize_ouvre_une_session(client, cle):
     assert r.json()["result"]["protocolVersion"] == "2025-06-18"
 
 
+def test_initialize_porte_les_instructions_canvas(client, cle):
+    """Le client LLM doit apprendre l'existence du canvas web des l'init."""
+    r = _initialiser(client, cle)
+    assert r.status_code == 200
+    instructions = r.json()["result"].get("instructions", "")
+    assert "get_canvas_url" in instructions
+    assert "/canvas" in instructions
+    assert "Blender" in instructions
+
+
+def test_get_canvas_url_renvoie_le_lien_avec_jeton(client, cle):
+    r = _initialiser(client, cle)
+    sid = r.headers["mcp-session-id"]
+    r2 = client.post(
+        "/mcp",
+        headers=_entetes(cle, session_id=sid),
+        json={
+            "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+            "params": {"name": "get_canvas_url", "arguments": {}},
+        },
+    )
+    assert r2.status_code == 200
+    texte = r2.json()["result"]["content"][0]["text"]
+    assert "/canvas?token=" in texte
+    assert cle in texte
+    tools = client.post(
+        "/mcp",
+        headers=_entetes(cle, session_id=sid),
+        json={"jsonrpc": "2.0", "id": 3, "method": "tools/list", "params": {}},
+    ).json()["result"]["tools"]
+    names = {t["name"] for t in tools}
+    assert "get_canvas_url" in names
+    desktop = next(t for t in tools if t["name"] == "blender_desktop_ui")
+    assert desktop["_meta"]["ui"]["resourceUri"] == "ui://blenderremotemcp/desktop"
+
+
+def test_resource_ui_desktop_est_une_mcp_app(client, cle):
+    r = _initialiser(client, cle)
+    sid = r.headers["mcp-session-id"]
+    listed = client.post(
+        "/mcp",
+        headers=_entetes(cle, session_id=sid),
+        json={"jsonrpc": "2.0", "id": 2, "method": "resources/list", "params": {}},
+    ).json()["result"]["resources"]
+    assert any(x["uri"] == "ui://blenderremotemcp/desktop" for x in listed)
+    read = client.post(
+        "/mcp",
+        headers=_entetes(cle, session_id=sid),
+        json={
+            "jsonrpc": "2.0", "id": 3, "method": "resources/read",
+            "params": {"uri": "ui://blenderremotemcp/desktop"},
+        },
+    ).json()["result"]["contents"][0]
+    assert read["mimeType"] == "text/html;profile=mcp-app"
+    assert "mcp-app" in read["mimeType"]
+    assert "/canvas?token=" in read["text"]
+    assert cle in read["text"]
+
+
 def test_version_de_protocole_negociee(client, cle):
     """Une version connue est reprise, une version inconnue est corrigee."""
     assert _initialiser(client, cle, "2024-11-05").json()["result"]["protocolVersion"] == "2024-11-05"
@@ -132,7 +191,7 @@ def test_deux_sessions_coexistent_pour_un_meme_utilisateur(client, cle):
         r = client.post("/mcp", headers=_entetes(cle, sid),
                         json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
         assert r.status_code == 200
-        assert len(r.json()["result"]["tools"]) == 35
+        assert len(r.json()["result"]["tools"]) == 37
 
 
 def test_session_inconnue_refusee_mais_absence_toleree(client, cle):

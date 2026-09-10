@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: blender-remote-mcp
+  labels:
+    {{- include "blender-remote-mcp.labels" . | nindent 4 }}
+spec:
+  serviceName: blender-remote-mcp
+  replicas: {{ if .Values.global.suspend }}0{{ else }}1{{ end }}
+  selector:
+    matchLabels:
+      app: blender-remote-mcp
+  template:
+    metadata:
+      labels:
+        {{- include "blender-remote-mcp.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: blender-remote-mcp
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: mcp
+              containerPort: {{ .Values.service.port }}
+            - name: novnc
+              containerPort: {{ .Values.service.novncPort }}
+          env:
+            - name: MULTI_USER_MODE
+              value: "false"
+            - name: PORT
+              value: {{ .Values.service.port | quote }}
+            - name: PUBLIC_BASE_URL
+              value: {{ .Values.publicBaseUrl | quote }}
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.jwtSecretName }}
+                  key: JWT_SECRET
+            - name: AUTH_DATA_FILE
+              value: /projects/auth.json
+            - name: PYTHONUNBUFFERED
+              value: "1"
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: projects
+              mountPath: /projects
+            - name: tmp
+              mountPath: /tmp
+          startupProbe:
+            httpGet:
+              path: /health/ready
+              port: mcp
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: mcp
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: mcp
+            periodSeconds: 30
+            failureThreshold: 4
+      volumes:
+        - name: projects
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim | default "blender-remote-mcp-projects" }}
+        - name: tmp
+          emptyDir: {}

@@ -1,0 +1,48 @@
+### Accès Blender MCP
+
+- **Service** : [ouvrir /](https://{{ .Values.ingress.host }}/)
+- **Santé** : [GET /health](https://{{ .Values.ingress.host }}/health)
+{{- if .Values.mcpApiKey }}
+- **Canvas noVNC** : [ouvrir /canvas](https://{{ .Values.ingress.host }}/canvas?token={{ .Values.mcpApiKey }})
+{{- else }}
+- **Canvas noVNC** : `https://{{ .Values.ingress.host }}/canvas?token=<api_key>`
+{{- end }}
+
+{{- if .Values.mcpApiKey }}
+
+### Config MCP — copier-coller (Cursor / Claude Desktop / Passerelle)
+
+Cette clé n'apparaît **que** ici (session Onyxia SSO).
+
+```json
+{
+  "mcpServers": {
+    "blender": {
+      "url": "https://{{ .Values.ingress.host }}/mcp",
+      "transport": "streamable-http",
+      "headers": {
+        "Authorization": "Bearer {{ .Values.mcpApiKey }}"
+      }
+    }
+  }
+}
+```
+
+- **Clé API** : `{{ .Values.mcpApiKey }}`
+- Outils utiles : `get_canvas_url`, `blender_desktop_ui` (MCP Apps), `get_screenshot`
+{{- else }}
+
+### Créer une clé API
+
+```bash
+curl -X POST https://{{ .Values.ingress.host }}/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"toi@exemple.fr","password":"..."}'
+```
+
+Puis `helm upgrade … --set mcpApiKey=blender_…` pour l'afficher dans les notes.
+{{- end }}
+
+### Suspend / Resume
+
+Bouton pause dans Mes services (scale StatefulSet à 0). PVC `/projects` et `auth.json` conservés.

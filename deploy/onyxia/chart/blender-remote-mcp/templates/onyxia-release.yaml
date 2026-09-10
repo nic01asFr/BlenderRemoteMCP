@@ -1,0 +1,14 @@
+{{- if .Values.onyxia_user }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: sh.onyxia.release.v1.{{ .Release.Name }}
+  labels:
+    {{- include "blender-remote-mcp.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  owner: {{ .Values.onyxia_user | quote }}
+  friendlyName: {{ .Values.onyxia.friendlyName | default "Blender MCP" | quote }}
+  catalog: {{ .Values.onyxia.catalog | default "divers" | quote }}
+  share: "false"
+{{- end }}

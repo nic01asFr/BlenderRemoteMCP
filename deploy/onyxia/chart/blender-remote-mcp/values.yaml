@@ -1,0 +1,51 @@
+# Requis pour Suspend/Resume dans « Mes services » Onyxia
+global:
+  suspend: false
+
+image:
+  repository: ghcr.io/nic01asfr/blender-remote-mcp
+  tag: latest
+  pullPolicy: Always
+
+imagePullSecrets:
+  - name: ghcr-creds
+
+onyxia:
+  friendlyName: "Blender MCP"
+  catalog: "divers"
+
+onyxia_user: "nic01asfr"
+
+# Injecté dans les NOTES Helm (visible Mes services). Laisser vide si inconnu.
+mcpApiKey: ""
+
+publicBaseUrl: "https://user-nic01asfr-blender-mcp.user.lab.sspcloud.fr"
+
+service:
+  port: 8100
+  novncPort: 6080
+
+ingress:
+  enabled: true
+  className: nginx
+  host: user-nic01asfr-blender-mcp.user.lab.sspcloud.fr
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+
+persistence:
+  size: 10Gi
+  existingClaim: blender-remote-mcp-projects
+
+jwtSecretName: blender-remote-mcp-secrets
+
+resources:
+  requests:
+    cpu: "1"
+    memory: 2Gi
+  limits:
+    cpu: "4"
+    memory: 6Gi

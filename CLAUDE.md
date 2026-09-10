@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **BlenderRemoteMCP** - a cloud Blender service exposed over the Model Context Protocol. An MCP client (Claude Desktop, etc.) authenticates with a Bearer API key and gets its own isolated Blender 4.0 Docker container, plus an interactive noVNC canvas in the browser.
 
-Naming note: the repo was renamed to `BlenderRemoteMCP` (https://github.com/nic01asFr/BlenderRemoteMCP.git). `README.md`, `BRAND_ARCHITECTURE.md`, `NAMING_OPTIONS.md` and the `origin` remote still say `BigBlender` / `BigBlenderMCP` - update them when touching those files.
+Naming note: the repo is `BlenderRemoteMCP` (https://github.com/nic01asFr/BlenderRemoteMCP.git). Prefer that name in docs and remotes; legacy `BigBlender` / `BigBlenderMCP` may still appear in old commits.
 
 ## Commands
 
@@ -94,9 +94,9 @@ A single tool touches three places in `main_mcp.py`, and two more if Blender doe
 4. If new: a route in `docker/blender-canvas/api_server.py` calling `send_to_blender({"action": ...})`.
 5. If new: an entry in `BlenderAPIHandler.handlers` in `blender_addon.py`, then rebuild the image.
 
-35 tools are registered today, grouped as: scene objects, collections, materials, projects/undo, scene setup (`initialize_scene`, `setup_studio_lighting`, `setup_camera`), introspection (`get_scene_info`, `list_meshes`, `cleanup_unused`), GUI input (`send_keypress`, `send_click`, `restart_blender`), and render config (`detect_gpu`, `configure_render`).
+37 tools are registered today, grouped as: scene objects, collections, materials, projects/undo, scene setup (`initialize_scene`, `setup_studio_lighting`, `setup_camera`), introspection (`get_scene_info`, `list_meshes`, `cleanup_unused`), GUI (`get_screenshot`, `get_canvas_url`, `blender_desktop_ui`, `send_keypress`, `send_click`, `restart_blender`), and render config (`detect_gpu`, `configure_render`).
 
-`get_screenshot` is the one exception to the string contract: it returns a dict tagged `_type: "image"` and is special-cased before the generic text wrapping, emitting an MCP `image` content block.
+`get_screenshot` is the one exception to the string contract: it returns a dict tagged `_type: "image"` and is special-cased before the generic text wrapping, emitting an MCP `image` content block. `blender_desktop_ui` declares `_meta.ui.resourceUri` (`ui://blenderremotemcp/desktop`) for MCP Apps hosts.
 
 MCP resources (`blender://scene`, `blender://projects`) are declared in `resources/list`; `blender://projects` currently returns an empty list.
 
