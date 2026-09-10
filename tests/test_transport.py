@@ -330,6 +330,7 @@ def test_canvas_rend_la_page_en_mode_mono(client, cle, monkeypatch):
     assert r.status_code == 200, r.text[:300]
     assert "/static/novnc/core/rfb.js" in r.text
     assert "id=\"desktop\"" in r.text
+    assert "class=\"stage\"" in r.text or 'class="stage"' in r.text
     assert "id=\"controls\"" not in r.text
     assert "id=\"fullscreen-hint\"" not in r.text
     assert "id=\"status-indicator\"" not in r.text
@@ -342,6 +343,7 @@ def test_desktop_est_l_url_canonique(client, cle, monkeypatch):
     r = client.get(f"/desktop?token={cle}&embed=1")
     assert r.status_code == 200, r.text[:300]
     assert "/static/novnc/core/rfb.js" in r.text
+    assert "stage embed" in r.text
     assert "Démarrage" in r.text or "D&eacute;marrage" in r.text
 
 

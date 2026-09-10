@@ -79,9 +79,10 @@ RUN chmod +x /app/entrypoint.sh
 RUN mkdir -p /root/.config/blender/4.0/scripts/startup && \
     cp /app/startup.py /root/.config/blender/4.0/scripts/startup/
 
-# Configure Fluxbox to remove window decorations for Blender
+# Configure Fluxbox : pas de toolbar, Blender plein écran
 RUN mkdir -p /root/.fluxbox
 COPY fluxbox-apps /root/.fluxbox/apps
+COPY fluxbox-init /root/.fluxbox/init
 
 # Bornes de parallelisme et geometrie de l'affichage.
 #

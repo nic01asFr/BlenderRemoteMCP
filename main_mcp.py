@@ -2413,8 +2413,8 @@ async def desktop_page(request: Request, token: str = None, embed: str = None):
     ``embed=1`` est réservé à un futur hub (même page, contrat d'iframe).
     Auth via ``?token=`` ou cookie ``blender_token``.
     """
-    _ = embed  # documenté pour le contrat hub ; pas de branche UI distincte en v1
     auth_token = token or request.cookies.get("blender_token")
+    embed_mode = str(embed or "").strip().lower() in ("1", "true", "yes")
 
     if not auth_token:
         return HTMLResponse("""
@@ -2470,6 +2470,7 @@ async def desktop_page(request: Request, token: str = None, embed: str = None):
         "user_id": user.id,
         "session": session.to_dict() if hasattr(session, 'to_dict') else {},
         "token": auth_token,
+        "embed": embed_mode,
     })
     # Le WebSocket du bureau s'authentifie par ce cookie : un navigateur ne
     # peut pas poser d'en-tete Authorization sur une connexion WebSocket.
