@@ -1,0 +1,134 @@
+{
+  "nom": "BlenderRemoteMCP",
+  "pitch": "Blender 4.0 dans le cloud, piloté par un agent via MCP — canvas noVNC live, outils scène / matériaux / rendu, déployable sur SSPCloud.",
+  "couleur": "#ff6b35",
+  "tags": ["Blender", "MCP", "SSPCloud", "Onyxia", "noVNC"],
+  "depot": "https://github.com/nic01asFr/BlenderRemoteMCP",
+  "points": [
+    {
+      "titre": "Blender réel, pas une démo",
+      "texte": "Instance Blender 4.0 avec GUI sur Xvfb, exposée en noVNC. L’agent agit sur bpy ; toi tu vois la scène dans le navigateur."
+    },
+    {
+      "titre": "MCP Streamable HTTP",
+      "texte": "Connecteur Cursor / Claude Desktop / Passerelle. Auth Bearer, sessions, 37 outils — create, matériaux, éclairage, rendu, execute_python."
+    },
+    {
+      "titre": "Lien canvas pour l’utilisateur",
+      "texte": "get_canvas_url et blender_desktop_ui (MCP Apps) : l’agent doit partager l’UI live, pas seulement décrire la scène."
+    },
+    {
+      "titre": "Fait pour SSPCloud",
+      "texte": "Image all-in-one sur GHCR, chart Helm avec Mes services Onyxia, PVC /projects et auth persistante."
+    }
+  ],
+  "titreFonctionnalites": "Ce que tu peux faire",
+  "fonctionnalites": [
+    {
+      "titre": "Scène et objets",
+      "texte": "Créer, transformer, dupliquer, collections, caméra, studio lighting — le cœur métier 3D accessible en language naturel via l’agent.",
+      "pourQui": "Quand tu veux prototyper une scène sans ouvrir Blender localement."
+    },
+    {
+      "titre": "Matériaux et rendu",
+      "texte": "Matériaux Principled, detect_gpu / configure_render (Cycles CPU ou GPU selon l’hôte), screenshots X11 du viewport live.",
+      "pourQui": "Pour vérifier le résultat dans le chat avant d’ouvrir le canvas."
+    },
+    {
+      "titre": "Python bpy",
+      "texte": "execute_python dans le processus Blender : scripts, géométrie procédurale, automatisations — résultat sérialisé pour l’agent.",
+      "pourQui": "Dès que les outils déclarés ne suffisent plus."
+    },
+    {
+      "titre": "Canvas noVNC + MCP Apps",
+      "texte": "GUI complète dans le navigateur ; resource ui://blenderremotemcp/desktop pour les hosts qui supportent MCP Apps.",
+      "pourQui": "Pour valider à l’œil ou reprendre la main sur le desktop."
+    },
+    {
+      "titre": "Déploiement Onyxia",
+      "texte": "Mode mono (pas de Docker-in-Docker) : StatefulSet, Ingress, Suspend/Resume dans Mes services.",
+      "pourQui": "Lab SSPCloud / pod utilisateur."
+    }
+  ],
+  "encart": {
+    "titre": "Une clé, un Blender",
+    "texte": "Tu t’enregistres une fois (API key blender_…). Le même jeton authentifie le MCP et le canvas (?token=). Sur Onyxia, le PVC garde auth.json et les projets.",
+    "lien": {
+      "libelle": "Voir le README",
+      "url": "https://github.com/nic01asFr/BlenderRemoteMCP#readme"
+    }
+  },
+  "produit": {
+    "accroche": "BlenderRemoteMCP expose Blender comme service MCP : l’agent construit la scène, tu regardes et tu intervient via le canvas — sur SSPCloud ou en local Docker.",
+    "chiffres": [
+      { "valeur": "37", "libelle": "outils MCP" },
+      { "valeur": "4.0", "libelle": "Blender" },
+      { "valeur": "1", "libelle": "pod mono Onyxia" }
+    ],
+    "titreSequence": "Le parcours",
+    "sequence": [
+      {
+        "titre": "Tu déploies le service",
+        "texte": "docker-compose en local, ou chart Helm / image GHCR sur ton namespace SSPCloud."
+      },
+      {
+        "titre": "Tu prends une clé API",
+        "texte": "POST /api/auth/register — tu branches le Bearer dans Cursor, Claude Desktop ou la Passerelle."
+      },
+      {
+        "titre": "L’agent construit",
+        "texte": "Objets, matériaux, lumière, rendu. get_screenshot pour vérifier dans le chat."
+      },
+      {
+        "titre": "Tu ouvres le canvas",
+        "texte": "L’agent appelle get_canvas_url (ou blender_desktop_ui) et te donne le lien noVNC live."
+      }
+    ],
+    "titreContextes": "Quand ça compte",
+    "contextes": [
+      {
+        "titre": "Agent sans Blender local",
+        "texte": "Machine légère ou lab distant : Blender tourne dans le pod, l’agent parle MCP.",
+        "pourquoi": "Sinon chaque poste doit installer et maintenir Blender."
+      },
+      {
+        "titre": "Démo / atelier SSPCloud",
+        "texte": "Même espace Onyxia que tes autres services ; Suspend/Resume pour le quota.",
+        "pourquoi": "Un service jetable ne doit pas monopoliser le namespace."
+      },
+      {
+        "titre": "Boucle agent + validation visuelle",
+        "texte": "Screenshot dans le chat, canvas pour la main humaine — le même instance.",
+        "pourquoi": "Un rendu texte ne suffit pas pour la 3D."
+      }
+    ]
+  },
+  "stack": {
+    "titre": "Stack ouverte · SSPCloud",
+    "texte": "Code ouvert, image GHCR, chart Helm versionné. Forme de service calquée sur QgisRemoteMCP — mono/multi, auth, skills, déployable sur pod.",
+    "items": [
+      "main_mcp.py — transport Streamable HTTP + outils",
+      "docker/blender-canvas — Blender 4.0 + addon + noVNC",
+      "docker/all-in-one — image mono pour Onyxia",
+      "deploy/onyxia/chart — Mes services + Suspend"
+    ]
+  },
+  "journal": [
+    {
+      "version": "vitrine",
+      "texte": "Page produit GitHub Pages — vitrine.json + generate.mjs, sections promesse / parcours / stack / journal."
+    },
+    {
+      "version": "mcp-apps",
+      "texte": "instructions initialize, get_canvas_url, blender_desktop_ui + ui://blenderremotemcp/desktop."
+    },
+    {
+      "version": "onyxia",
+      "texte": "Chart Helm, Secret sh.onyxia.release, image ghcr.io/nic01asfr/blender-remote-mcp."
+    },
+    {
+      "version": "naming",
+      "texte": "BlenderRemoteMCP — README et remote alignés (ex-BigBlender)."
+    }
+  ]
+}

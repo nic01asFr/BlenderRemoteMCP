@@ -2,6 +2,8 @@
 
 **Blender 4.0 cloud pour agents MCP** — instance isolée, canvas noVNC live, outils scène / matériaux / rendu.
 
+[Vitrine](https://nic01asfr.github.io/BlenderRemoteMCP/) · [Dépôt](https://github.com/nic01asFr/BlenderRemoteMCP)
+
 ## Démarrage rapide
 
 ```bash
