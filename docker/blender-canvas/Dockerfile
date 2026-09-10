@@ -79,10 +79,15 @@ RUN chmod +x /app/entrypoint.sh
 RUN mkdir -p /root/.config/blender/4.0/scripts/startup && \
     cp /app/startup.py /root/.config/blender/4.0/scripts/startup/
 
-# Configure Fluxbox : pas de toolbar, Blender plein écran
+# Configure Fluxbox : pas de toolbar ; forcer LF (COPY Windows peut injecter CR
+# et casser session.appsFile / toolbar.visible — Blender se retrouvait a y=42).
 RUN mkdir -p /root/.fluxbox
 COPY fluxbox-apps /root/.fluxbox/apps
 COPY fluxbox-init /root/.fluxbox/init
+RUN sed -i 's/\r$//' /root/.fluxbox/init /root/.fluxbox/apps
+
+COPY fit-blender.sh /app/fit-blender.sh
+RUN chmod +x /app/fit-blender.sh && sed -i 's/\r$//' /app/fit-blender.sh /etc/supervisor/conf.d/supervisord.conf
 
 # Bornes de parallelisme et geometrie de l'affichage.
 #

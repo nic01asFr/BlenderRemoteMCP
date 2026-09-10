@@ -47,22 +47,8 @@ def configure_blender():
         pass
 
     # Keep default render engine (Eevee) - user can switch via MCP if needed
-
-    # Plein ecran : le WM peut maximiser, mais Blender a aussi son mode
-    # fullscreen qui couvre toute la geometrie Xvfb (plus de barre fluxbox
-    # sous-jacente si elle reapparait).
-    def _plein_ecran():
-        try:
-            bpy.ops.wm.window_fullscreen_toggle()
-            print("Blender passe en plein ecran")
-        except Exception as e:
-            print(f"Plein ecran impossible : {e}")
-        return None
-
-    try:
-        bpy.app.timers.register(_plein_ecran, first_interval=1.5)
-    except Exception as e:
-        print(f"Timer plein ecran : {e}")
+    # Le plein cadre X11 est assure par fit-blender.sh (xdotool), pas par
+    # wm.window_fullscreen_toggle : ce dernier decalait la fenetre (y=42).
 
     # Set resolution
     try:

@@ -331,6 +331,7 @@ def test_canvas_rend_la_page_en_mode_mono(client, cle, monkeypatch):
     assert "/static/novnc/core/rfb.js" in r.text
     assert "id=\"desktop\"" in r.text
     assert "class=\"stage\"" in r.text or 'class="stage"' in r.text
+    assert "aspect-ratio" in r.text
     assert "id=\"controls\"" not in r.text
     assert "id=\"fullscreen-hint\"" not in r.text
     assert "id=\"status-indicator\"" not in r.text

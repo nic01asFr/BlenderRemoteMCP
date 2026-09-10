@@ -1,31 +1,7 @@
-# Fluxbox window rules — Blender plein viewport, sans décorations WM.
-
 [app] (class=Blender)
   [Deco] {NONE}
   [Maximized] {yes}
-  [Fullscreen] {yes}
-  [Layer] {12}
   [Sticky] {yes}
-  [Dimensions] {100% 100%}
-  [Position] (UPPERLEFT) {0 0}
-[end]
-
-[app] (name=blender)
-  [Deco] {NONE}
-  [Maximized] {yes}
-  [Fullscreen] {yes}
   [Layer] {12}
-  [Sticky] {yes}
-  [Dimensions] {100% 100%}
-  [Position] (UPPERLEFT) {0 0}
-[end]
-
-[app] (name=Blender)
-  [Deco] {NONE}
-  [Maximized] {yes}
-  [Fullscreen] {yes}
-  [Layer] {12}
-  [Sticky] {yes}
-  [Dimensions] {100% 100%}
   [Position] (UPPERLEFT) {0 0}
 [end]

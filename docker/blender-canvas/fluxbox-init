@@ -1,15 +1,10 @@
-# Fluxbox — bureau immersif pour BlenderRemoteMCP
-# Pas de toolbar / workspace labels : seul le framebuffer Blender doit rester visible.
-
+# Fluxbox — bureau immersif (LF only, jamais de CR)
 session.screen0.toolbar.visible: false
 session.screen0.toolbar.autoHide: true
 session.screen0.workspaces: 1
 session.screen0.workspacewarping: false
 session.screen0.defaultDeco: NONE
-session.screen0.window.focus.alpha: 255
-session.screen0.window.unfocus.alpha: 255
-session.screen0.rootCommand: xsetroot -solid "#0d0d0d"
+session.screen0.rootCommand: xsetroot -solid #0d0d0d
 session.appsFile: ~/.fluxbox/apps
-session.styleFile: /usr/share/fluxbox/styles/bloe
 session.ignoreBorder: true
 session.forceFocusStealing: true
