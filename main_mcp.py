@@ -46,6 +46,8 @@ from src.container_manager import ContainerManager
 from src.auth import (AuthManager, UserCreate, UserLogin, TokenResponse,
                       SCOPED_PREFIX, TOUS_LES_OUTILS)
 from src import oauth_mcp
+from src import guidance as guidance_mod
+from src.guidance import build_context, infer_phase, substitute_params
 
 # Configuration
 logging.basicConfig(level=logging.INFO)
@@ -1508,7 +1510,60 @@ MCP_TOOLS = {
             },
             "required": []
         }
-    }
+    },
+    "list_recipes": {
+        "description": (
+            "List guided workflow recipes (expertise/recipes). "
+            "Prefer a recipe over improvising with execute_python when one matches."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "tag": {"type": "string", "description": "Optional tag filter (studio, archviz, …)"}
+            },
+            "required": []
+        }
+    },
+    "get_recipe": {
+        "description": "Get full recipe definition (steps, parameters) by id.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "string", "description": "Recipe id (e.g. clear_and_studio)"}
+            },
+            "required": ["id"]
+        }
+    },
+    "run_recipe": {
+        "description": (
+            "Execute a recipe step-by-step using primitive MCP tools. "
+            "Pass parameter values matching the recipe schema."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "string", "description": "Recipe id"},
+                "params": {"type": "object", "description": "Recipe parameters"}
+            },
+            "required": ["id"]
+        }
+    },
+    "get_blender_context": {
+        "description": (
+            "Guidance context for the agent (phase hint, skills/recipes indexes). "
+            "For live scene data, also call get_scene_info."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "phase": {
+                    "type": "string",
+                    "description": "Optional phase: setup|model|shade|light|render|review"
+                }
+            },
+            "required": []
+        }
+    },
 }
 
 
@@ -1563,25 +1618,30 @@ def _mcp_instructions(base_url: str) -> str:
     return (
         "You control a live Blender 4.0 instance (full GUI in the browser).\n"
         "\n"
+        "## Expertise first (do not improvise blindly)\n"
+        "1. Read skills via resources (`skill://bpy-pitfalls`, `skill://modelling`, "
+        "`skill://materials`, `skill://lighting`, `skill://camera-render`).\n"
+        "2. Prefer **list_recipes** / **run_recipe** when a workflow matches "
+        "(studio_product, clear_and_studio, archviz_exterior).\n"
+        "3. Use **prompts** (demarrer_studio, archviz_exterieur, auditer_scene) as starters.\n"
+        "4. Only then use primitive tools or short `execute_python` (assign `result`).\n"
+        "\n"
         "## Web UI — give this link to the user\n"
-        "There is an interactive desktop (full Blender GUI in the browser). "
-        "Call **get_canvas_url** and share the returned URL with the user "
-        "whenever they want to see the scene, validate visually, or work in the GUI. "
-        "Do this proactively after meaningful scene changes, not only if asked.\n"
-        "If the client supports MCP Apps, call **blender_desktop_ui** to open the "
-        "inline Blender view in the conversation.\n"
+        "Call **get_canvas_url** (and **blender_desktop_ui** if MCP Apps) after "
+        "meaningful scene changes so the user can validate visually.\n"
         f"Desktop path: `{base}/desktop?token=<API key from the MCP Bearer header>`.\n"
         "\n"
         "## Recommended workflow\n"
-        "1. Build / edit the scene with tools (`create_object`, materials, lighting, …).\n"
-        "2. **get_screenshot** — verify in-chat (X11 capture of the live display).\n"
-        "3. **get_canvas_url** and/or **blender_desktop_ui** — give the user the live GUI.\n"
-        "4. Optional: `send_keypress` / `send_click` to drive the GUI from the agent.\n"
+        "1. get_blender_context / get_scene_info — know where you are.\n"
+        "2. Build via recipe or tools (`create_object`, materials, lighting, …).\n"
+        "3. **get_screenshot** — verify in-chat.\n"
+        "4. **get_canvas_url** — live GUI for the user.\n"
         "\n"
         "## Notes\n"
-        "- Auth is required: the desktop URL embeds the same API key as the MCP Bearer token.\n"
-        "- `execute_python` runs against live `bpy`; assign to `result` to return values.\n"
+        "- Auth: desktop URL embeds the same API key as the MCP Bearer token.\n"
         "- On CPU-only hosts, prefer Cycles CPU + denoising via `configure_render`.\n"
+        "- Domain expertise (BIM, roads, mesh) lives outside this workspace — "
+        "compose other MCP servers; do not invent norms in execute_python.\n"
     )
 
 
@@ -1619,6 +1679,7 @@ async def handle_mcp_request(body: dict, user_id: str, session_id: str = "",
                 "capabilities": {
                     "tools": {"listChanged": False},
                     "resources": {"subscribe": False, "listChanged": False},
+                    "prompts": {"listChanged": False},
                     "extensions": {
                         "io.modelcontextprotocol/ui": {},
                     },
@@ -1849,15 +1910,55 @@ async def handle_mcp_request(body: dict, user_id: str, session_id: str = "",
                     arguments.get("y", 0),
                     arguments.get("button", 1)
                 )
+            elif tool_name == "list_recipes":
+                result = json.dumps(
+                    guidance_mod.catalog.list_recipes(arguments.get("tag") or ""),
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            elif tool_name == "get_recipe":
+                recipe = guidance_mod.catalog.get_recipe(arguments.get("id", ""))
+                result = (
+                    json.dumps(recipe, ensure_ascii=False, indent=2)
+                    if recipe else "Error: recipe inconnue"
+                )
+            elif tool_name == "run_recipe":
+                result = await _executer_recipe(
+                    arguments.get("id", ""),
+                    arguments.get("params") or {},
+                    user_id=user_id,
+                    session_id=session_id,
+                    portee=portee,
+                    base_url=base,
+                    api_key=api_key,
+                )
+            elif tool_name == "get_blender_context":
+                phase = arguments.get("phase") or "model"
+                result = json.dumps(
+                    build_context(
+                        phase,
+                        extra={
+                            "skills": list(guidance_mod.catalog.skills.keys()),
+                            "recipes": list(guidance_mod.catalog.recipes.keys()),
+                            "note": "Pour l'état live bpy, appelle aussi get_scene_info.",
+                        },
+                    ),
+                    ensure_ascii=False,
+                    indent=2,
+                )
             else:
                 result = f"Tool {tool_name} not implemented"
+
+            if isinstance(result, str) and not result.startswith("Error:"):
+                ctx = build_context(infer_phase(tool_name))
+                result = f"{result}\n\n_context: {json.dumps(ctx, ensure_ascii=False)}"
 
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,
                 "result": {
                     "content": [{"type": "text", "text": result}],
-                    "isError": result.startswith("Error:")
+                    "isError": isinstance(result, str) and result.startswith("Error:")
                 }
             }
         except Exception as e:
@@ -1872,27 +1973,40 @@ async def handle_mcp_request(body: dict, user_id: str, session_id: str = "",
 
     # List resources
     if method == "resources/list":
+        resources = [
+            {
+                "uri": "ui://blenderremotemcp/desktop",
+                "name": "Blender Desktop",
+                "description": "Interactive Blender Desktop — live viewport with link to the full desktop.",
+                "mimeType": "text/html;profile=mcp-app",
+            },
+            {"uri": "blender://scene", "name": "Scene", "description": "Current scene state"},
+            {"uri": "blender://projects", "name": "Projects", "description": "Saved projects"},
+        ]
+        resources.extend(guidance_mod.catalog.skill_resources())
         return {
             "jsonrpc": "2.0",
             "id": req_id,
-            "result": {
-                "resources": [
-                    {
-                        "uri": "ui://blenderremotemcp/desktop",
-                        "name": "Blender Desktop",
-                        "description": "Interactive Blender Desktop — live viewport with link to the full desktop.",
-                        "mimeType": "text/html;profile=mcp-app",
-                    },
-                    {"uri": "blender://scene", "name": "Scene", "description": "Current scene state"},
-                    {"uri": "blender://projects", "name": "Projects", "description": "Saved projects"},
-                ]
-            }
+            "result": {"resources": resources},
         }
 
     # Read resource
     if method == "resources/read":
         uri = params.get("uri", "")
         try:
+            skill = guidance_mod.catalog.read_skill(uri)
+            if skill:
+                return {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "result": {
+                        "contents": [{
+                            "uri": uri,
+                            "mimeType": "text/markdown",
+                            "text": skill["text"],
+                        }]
+                    },
+                }
             if uri == "ui://blenderremotemcp/desktop":
                 canvas = _canvas_url(base, api_key)
                 if templates:
@@ -1953,12 +2067,111 @@ async def handle_mcp_request(body: dict, user_id: str, session_id: str = "",
                 "error": {"code": -32603, "message": str(e)}
             }
 
+    if method == "prompts/list":
+        return {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": {"prompts": guidance_mod.catalog.list_prompts()},
+        }
+
+    if method == "prompts/get":
+        name = params.get("name", "")
+        arguments = params.get("arguments") or {}
+        prompt = guidance_mod.catalog.get_prompt(name, arguments)
+        if not prompt:
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "error": {"code": -32602, "message": f"Unknown prompt: {name}"},
+            }
+        return {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": prompt,
+        }
+
     # Unknown method
     return {
         "jsonrpc": "2.0",
         "id": req_id,
         "error": {"code": -32601, "message": f"Method not found: {method}"}
     }
+
+
+async def _executer_recipe(
+    recipe_id: str,
+    params: dict,
+    *,
+    user_id: str,
+    session_id: str,
+    portee,
+    base_url: str,
+    api_key: str,
+) -> str:
+    """Enchaine les steps d'une recipe via tools/call internes."""
+    recipe = guidance_mod.catalog.get_recipe(recipe_id)
+    if not recipe:
+        return f"Error: recipe inconnue: {recipe_id}"
+
+    resolved = {}
+    for key, spec in (recipe.get("parameters") or {}).items():
+        if key in params:
+            resolved[key] = params[key]
+        elif isinstance(spec, dict) and "default" in spec:
+            resolved[key] = spec["default"]
+
+    journal = []
+    for step in recipe.get("steps") or []:
+        tool = step.get("tool")
+        if not tool:
+            continue
+        if tool == "run_recipe":
+            return "Error: recipes imbriquées non supportées — aplatis les steps"
+        step_args = substitute_params(step.get("params") or {}, resolved)
+        if tool == "execute_python" and step.get("code"):
+            step_args = {"code": substitute_params(step["code"], resolved)}
+        body = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": tool, "arguments": step_args},
+        }
+        resp = await handle_mcp_request(
+            body, user_id, session_id, portee, base_url, api_key
+        )
+        err = False
+        text = ""
+        if "error" in resp:
+            err = True
+            text = resp["error"].get("message", str(resp["error"]))
+        else:
+            result = resp.get("result") or {}
+            err = bool(result.get("isError"))
+            parts = []
+            for block in result.get("content") or []:
+                if block.get("type") == "text":
+                    parts.append(block.get("text", ""))
+                elif block.get("type") == "image":
+                    parts.append("[image]")
+            text = "\n".join(parts)[:500]
+        journal.append({
+            "step": step.get("id"),
+            "tool": tool,
+            "ok": not err,
+            "detail": text[:240],
+        })
+        if err:
+            return json.dumps(
+                {"recipe": recipe_id, "failed_step": step.get("id"), "log": journal},
+                ensure_ascii=False,
+                indent=2,
+            )
+
+    return json.dumps(
+        {"recipe": recipe_id, "status": "ok", "log": journal},
+        ensure_ascii=False,
+        indent=2,
+    )
 
 
 # =============================================================================

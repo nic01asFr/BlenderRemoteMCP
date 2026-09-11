@@ -43,6 +43,7 @@ COPY main_mcp.py /app/
 COPY src/ /app/src/
 COPY templates/ /app/templates/
 COPY static/ /app/static/
+COPY expertise/ /app/expertise/
 
 # Le serveur MCP rejoint les programmes deja geres par supervisord. On ajoute
 # le bloc a la configuration existante plutot que de la dupliquer : elle reste
@@ -69,7 +70,8 @@ ENV MULTI_USER_MODE=false \
     BLENDER_API_PORT=8080 \
     BLENDER_STREAM_PORT=8081 \
     BLENDER_NOVNC_PORT=6080 \
-    AUTH_DATA_FILE=/projects/auth.json
+    AUTH_DATA_FILE=/projects/auth.json \
+    EXPERTISE_DIR=/app/expertise
 
 # 8100 : serveur MCP — les autres ports viennent de l'image de base
 # (6080 noVNC, 8080 API Blender, 8081 flux MJPEG).

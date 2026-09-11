@@ -1,0 +1,33 @@
+{
+  "id": "archviz_exterior",
+  "name": "Amorce archviz extérieur",
+  "description": "Checklist guidée (phases) pour un rendu extérieur — s'appuie sur skills lighting/materials/camera-render. Étapes tools minimales ; le détail est dans les skills.",
+  "tags": ["archviz", "extérieur", "workflow"],
+  "parameters": {},
+  "steps": [
+    {
+      "id": "read_skills",
+      "tool": "get_scene_info",
+      "params": {},
+      "description": "État initial — puis lire skill://lighting, skill://materials, skill://camera-render"
+    },
+    {
+      "id": "studio_or_sun",
+      "tool": "setup_studio_lighting",
+      "params": {},
+      "description": "Base lumière (remplacer/enrichir par sun+HDRI via execute_python si archviz)"
+    },
+    {
+      "id": "camera",
+      "tool": "setup_camera",
+      "params": {},
+      "description": "Caméra de départ"
+    },
+    {
+      "id": "check",
+      "tool": "get_screenshot",
+      "params": {},
+      "description": "Contrôle visuel"
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "id": "clear_and_studio",
+  "name": "Scène studio propre",
+  "description": "Remet une scène minimale avec éclairage studio et caméra — point de départ sûr.",
+  "tags": ["setup", "studio", "débutant"],
+  "parameters": {},
+  "steps": [
+    {
+      "id": "clear",
+      "tool": "clear_scene",
+      "params": {},
+      "description": "Retirer les objets utilisateur (caméra/lumières conservées selon l'outil)"
+    },
+    {
+      "id": "studio",
+      "tool": "setup_studio_lighting",
+      "params": {},
+      "description": "Éclairage studio 3 points"
+    },
+    {
+      "id": "camera",
+      "tool": "setup_camera",
+      "params": {},
+      "description": "Caméra de départ"
+    }
+  ]
+}

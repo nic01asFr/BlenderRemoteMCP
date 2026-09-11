@@ -1,0 +1,50 @@
+[
+  {
+    "name": "demarrer_studio",
+    "description": "Démarrer une session produit / démo propre (studio + sujet).",
+    "arguments": [
+      {
+        "name": "object_type",
+        "description": "Type de sujet (CUBE, SPHERE, MONKEY…)",
+        "required": false
+      }
+    ],
+    "messages": [
+      {
+        "role": "user",
+        "content": {
+          "type": "text",
+          "text": "Prépare une scène studio propre pour un objet {{object_type}}. Lis skill://bpy-pitfalls et skill://lighting, utilise la recipe studio_product (ou clear_and_studio + create_object), puis envoie un screenshot et le lien get_canvas_url."
+        }
+      }
+    ]
+  },
+  {
+    "name": "archviz_exterieur",
+    "description": "Amorcer un workflow archviz extérieur guidé par les skills.",
+    "arguments": [],
+    "messages": [
+      {
+        "role": "user",
+        "content": {
+          "type": "text",
+          "text": "Amorce un rendu archviz extérieur. Lis skill://lighting, skill://materials, skill://camera-render et la recipe archviz_exterior. Organise la scène (collections), pose lumière/caméra, screenshot, puis partage get_canvas_url. N'improvise pas en execute_python tant qu'un outil ou une recipe existe."
+        }
+      }
+    ]
+  },
+  {
+    "name": "auditer_scene",
+    "description": "Faire un état des lieux de la scène avant modification.",
+    "arguments": [],
+    "messages": [
+      {
+        "role": "user",
+        "content": {
+          "type": "text",
+          "text": "Audite la scène courante : get_scene_info, list_objects, list_materials, list_meshes. Résume risques (échelle, orphelins, éclairage). Propose la prochaine recipe ou skill à lire. Screenshot optionnel."
+        }
+      }
+    ]
+  }
+]

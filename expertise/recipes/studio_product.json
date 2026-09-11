@@ -1,0 +1,45 @@
+{
+  "id": "studio_product",
+  "name": "Produit studio",
+  "description": "Sujet simple, studio light, caméra — démo produit.",
+  "tags": ["studio", "produit", "demo"],
+  "parameters": {
+    "object_type": {
+      "type": "string",
+      "default": "CUBE",
+      "description": "CUBE, SPHERE, MONKEY…"
+    }
+  },
+  "steps": [
+    {
+      "id": "clear",
+      "tool": "clear_scene",
+      "params": {},
+      "description": "Scène propre"
+    },
+    {
+      "id": "studio",
+      "tool": "setup_studio_lighting",
+      "params": {},
+      "description": "Éclairage studio"
+    },
+    {
+      "id": "camera",
+      "tool": "setup_camera",
+      "params": {},
+      "description": "Caméra"
+    },
+    {
+      "id": "subject",
+      "tool": "create_object",
+      "params": {"type": "$object_type", "name": "Subject", "location": [0, 0, 0.5]},
+      "description": "Créer le sujet"
+    },
+    {
+      "id": "shot",
+      "tool": "get_screenshot",
+      "params": {},
+      "description": "Vérifier le viewport"
+    }
+  ]
+}
