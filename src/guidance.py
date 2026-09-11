@@ -168,7 +168,7 @@ def build_context(phase: str = "model", *, extra: Optional[Dict[str, Any]] = Non
     ctx = {
         "phase": phase,
         "hint": hints.get(phase, hints["model"]),
-        "skills_index": "resources/list → skill://…",
+        "skills_index": "resources/list -> skill://...",
         "recipes_index": "list_recipes",
     }
     if extra:

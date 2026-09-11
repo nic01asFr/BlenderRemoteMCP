@@ -11,27 +11,17 @@ venv/
 dist/
 build/
 
+# Secrets
+.env
+*.pem
+credentials.json
+.cursor/mcp.json
+
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
-
-# OS
-.DS_Store
-Thumbs.db
-nul
-
-# Project specific
-data/
-*.log
-*.blend1
-*.blend2
-
-# Secrets
-.env
-*.pem
-credentials.json
 
 # WikiChat overlay (auto-added)
 .wikichat/
