@@ -1,31 +1,25 @@
-# Geometry Nodes — profil natif (L1–L3, bridge futur)
+# Geometry Nodes — profil natif (L1–L3 + bridge)
 
-Profil **Blender natif** (pas L4 métier). Les clients peuvent s’en inspirer
-pour packager d’autres profils (skills + recipes + helpers image).
+Profil **Blender natif** (pas L4 métier).
 
 ## État
 
 | Élément | Statut |
 |---------|--------|
-| `skill://geometry-nodes` | Fait (API 4.0.2 live + opérateurs Blender) |
-| Recipes `gn_scatter_instances`, `gn_curve_to_mesh_pipe` | Fait |
+| `skill://geometry-nodes` | Fait |
+| Recipes `gn_*` + `gn_pro_showcase` | Fait |
 | Prompt `geometry_nodes` | Fait |
-| Tools MCP `gn_*` dédiés | À venir (bridge) — aujourd’hui `execute_python` |
+| `gn_lib` dans l’image | Fait (`scatter_poisson`, `terrain_displace`, `facade_extrude`, `curve_railing`) |
+| Tools `gn_list_templates` / `gn_run_template` | Fait |
+| Tools inspect/set_input fins | À venir |
 
-## Contrat tools bridge (cible)
+## Usage agent
 
-Ne pas les exposer tant qu’absents du catalogue. Cible LLM-friendly :
+1. `gn_list_templates`
+2. `gn_run_template` avec params
+3. `get_screenshot` + `get_canvas_url`
+4. Recipe `gn_pro_showcase` pour une scène démo complète
 
-1. `gn_list_trees` — node groups `GeometryNodeTree` + objets qui les utilisent
-2. `gn_inspect_tree` — nodes, links, interface sockets (JSON)
-3. `gn_ensure_modifier(object, tree?)` — crée/assigne modifier NODES
-4. `gn_set_input(object, name|identifier, value)` — `mod[identifier] = …`
-5. `gn_new_tree_from_template(id)` — templates versionnés (scatter, pipe, …)
+## Extension client
 
-Réponses homogènes : `{ok, data, warnings, scene_digest}`.
-
-## Extension par le client
-
-Déposer skills/recipes additionnels sous `expertise/` (ou volume profil
-futur) sans forker le runtime. Les arbres `.blend` / assets GN peuvent
-vivre dans `/projects`.
+Ajouter un builder dans `gn_lib/builders.py` + entrée `registry.py` — sans forker le runtime MCP.

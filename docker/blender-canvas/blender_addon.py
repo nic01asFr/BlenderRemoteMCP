@@ -15,6 +15,7 @@ utile JSON UTF-8. Le socket n'est jamais expose hors du container.
 import bpy
 import socket
 import os
+import sys
 import json
 import queue
 import struct
@@ -25,6 +26,10 @@ import base64
 import tempfile
 import math
 import subprocess
+
+# Templates GN + modules /app (Blender embarque son propre Python)
+if "/app" not in sys.path:
+    sys.path.insert(0, "/app")
 
 try:
     import mathutils
@@ -318,9 +323,16 @@ class BlenderAPIHandler:
 
         # Namespace d'execution. mathutils est fourni quand il est disponible :
         # sans lui, impossible d'ecrire une transformation vectorielle.
+        # gn_lib : templates Geometry Nodes professionnels (profil natif).
         namespace = {"bpy": bpy, "result": None}
         if mathutils is not None:
             namespace["mathutils"] = mathutils
+        try:
+            import gn_lib  # type: ignore
+
+            namespace["gn_lib"] = gn_lib
+        except Exception:
+            pass
 
         try:
             exec(code, namespace)

@@ -430,6 +430,61 @@ async def mcp_execute_python(user_id: str, code: str) -> str:
         return f"Error: {e}"
 
 
+async def mcp_gn_list_templates(user_id: str) -> str:
+    """List Geometry Nodes templates available in gn_lib (inside Blender)."""
+        code = (
+            "import sys\n"
+            "if '/app' not in sys.path:\n"
+            "    sys.path.insert(0, '/app')\n"
+            "import gn_lib\n"
+            "result = gn_lib.list_templates()\n"
+        )
+    try:
+        result = await _call_blender(user_id, "/api/execute", "POST", {"code": code})
+        if result.get("success"):
+            return json.dumps(result.get("result"), ensure_ascii=False, indent=2)
+        return f"Error: {result.get('error')}"
+    except Exception as e:
+        return f"Error: {e}"
+
+
+async def mcp_gn_run_template(
+    user_id: str,
+    template_id: str,
+    params: dict | None = None,
+    object_name: str | None = None,
+) -> str:
+    """Build a professional Geometry Nodes setup from a versioned template."""
+    payload = {
+        "template_id": template_id,
+        "params": params or {},
+        "object_name": object_name,
+    }
+    code = (
+        "import sys\n"
+        "if '/app' not in sys.path:\n"
+        "    sys.path.insert(0, '/app')\n"
+        "import gn_lib, json\n"
+        f"_p = {json.dumps(payload, ensure_ascii=False)}\n"
+        "result = gn_lib.run(\n"
+        "    _p['template_id'],\n"
+        "    params=_p.get('params') or {},\n"
+        "    object_name=_p.get('object_name'),\n"
+        ")\n"
+    )
+    try:
+        result = await _call_blender(user_id, "/api/execute", "POST", {"code": code})
+        if not result.get("success"):
+            return f"Error: {result.get('error')}"
+        data = result.get("result")
+        text = json.dumps(data, ensure_ascii=False, indent=2)
+        if isinstance(data, dict) and data.get("ok") is False:
+            return f"Error: {text}"
+        return text
+    except Exception as e:
+        return f"Error: {e}"
+
+
 async def mcp_save_project(user_id: str, name: str) -> str:
     """Save current scene as a project."""
     try:
@@ -1564,6 +1619,38 @@ MCP_TOOLS = {
             "required": []
         }
     },
+    "gn_list_templates": {
+        "description": (
+            "List professional Geometry Nodes templates (gn_lib). "
+            "Prefer gn_run_template over hand-built trees for complex results."
+        ),
+        "inputSchema": {"type": "object", "properties": {}, "required": []}
+    },
+    "gn_run_template": {
+        "description": (
+            "Build a versioned Geometry Nodes setup in the live scene "
+            "(scatter_poisson, terrain_displace, facade_extrude, curve_railing). "
+            "Read skill://geometry-nodes first."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "template_id": {
+                    "type": "string",
+                    "description": "Template id from gn_list_templates"
+                },
+                "params": {
+                    "type": "object",
+                    "description": "Template parameters (see gn_list_templates)"
+                },
+                "object_name": {
+                    "type": "string",
+                    "description": "Optional host object name"
+                }
+            },
+            "required": ["template_id"]
+        }
+    },
 }
 
 
@@ -1623,6 +1710,8 @@ def _mcp_instructions(base_url: str) -> str:
         "`skill://materials`, `skill://lighting`, `skill://camera-render`).\n"
         "2. Prefer **list_recipes** / **run_recipe** when a workflow matches "
         "(studio_product, clear_and_studio, archviz_exterior, gn_scatter_instances, gn_curve_to_mesh_pipe).\n"
+        "   For complex Geometry Nodes prefer **gn_list_templates** / **gn_run_template** "
+        "(terrain, facade, scatter poisson, railing).\n"
         "3. Use **prompts** (demarrer_studio, archviz_exterieur, auditer_scene, geometry_nodes) as starters.\n"
         "   For Geometry Nodes read skill://geometry-nodes before execute_python.\n"
         "4. Only then use primitive tools or short `execute_python` (assign `result`).\n"
@@ -1946,6 +2035,15 @@ async def handle_mcp_request(body: dict, user_id: str, session_id: str = "",
                     ),
                     ensure_ascii=False,
                     indent=2,
+                )
+            elif tool_name == "gn_list_templates":
+                result = await mcp_gn_list_templates(user_id)
+            elif tool_name == "gn_run_template":
+                result = await mcp_gn_run_template(
+                    user_id,
+                    arguments.get("template_id", ""),
+                    arguments.get("params") or {},
+                    arguments.get("object_name"),
                 )
             else:
                 result = f"Tool {tool_name} not implemented"

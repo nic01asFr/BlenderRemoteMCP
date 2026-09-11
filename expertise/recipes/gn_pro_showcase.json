@@ -1,0 +1,92 @@
+{
+  "id": "gn_pro_showcase",
+  "name": "GN pro — terrain + scatter + façade + railing",
+  "description": "Scène studio puis quatre templates gn_lib professionnels. Préférer gn_run_template.",
+  "tags": ["geometry-nodes", "pro", "showcase", "natif"],
+  "parameters": {},
+  "steps": [
+    {
+      "id": "clear",
+      "tool": "clear_scene",
+      "params": {},
+      "description": "Scène propre"
+    },
+    {
+      "id": "studio",
+      "tool": "setup_studio_lighting",
+      "params": {},
+      "description": "Éclairage studio"
+    },
+    {
+      "id": "camera",
+      "tool": "setup_camera",
+      "params": {},
+      "description": "Caméra"
+    },
+    {
+      "id": "terrain",
+      "tool": "gn_run_template",
+      "params": {
+        "template_id": "terrain_displace",
+        "params": {
+          "grid_size": 14.0,
+          "resolution": 96,
+          "noise_scale": 0.4,
+          "height": 1.6,
+          "object_name": "GN_Terrain"
+        }
+      },
+      "description": "Terrain procédural"
+    },
+    {
+      "id": "scatter",
+      "tool": "gn_run_template",
+      "params": {
+        "template_id": "scatter_poisson",
+        "params": {
+          "density_max": 28.0,
+          "distance_min": 0.35,
+          "instance_scale": 0.1,
+          "grid_size": 8.0,
+          "object_name": "GN_Scatter"
+        }
+      },
+      "description": "Scatter Poisson"
+    },
+    {
+      "id": "facade",
+      "tool": "gn_run_template",
+      "params": {
+        "template_id": "facade_extrude",
+        "params": {
+          "width": 7.0,
+          "height": 10.0,
+          "cols": 6,
+          "rows": 10,
+          "object_name": "GN_Facade"
+        }
+      },
+      "description": "Façade panneaux"
+    },
+    {
+      "id": "railing",
+      "tool": "gn_run_template",
+      "params": {
+        "template_id": "curve_railing",
+        "params": {
+          "radius": 2.5,
+          "post_count": 20,
+          "post_height": 0.9,
+          "object_name": "GN_Railing"
+        }
+      },
+      "description": "Garde-corps"
+    },
+    {
+      "id": "shot",
+      "tool": "get_screenshot",
+      "params": {},
+      "description": "Contrôle visuel"
+    }
+  ]
+}

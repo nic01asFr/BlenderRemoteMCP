@@ -120,12 +120,16 @@ Types d’objets supportés (poll officiel) : `MESH`, `POINTCLOUD`, `VOLUME`, `C
 
 ## Suite plateforme (bridge)
 
-Tools MCP futurs souhaités (ne pas les inventer tant qu’absents) :
+Tools MCP :
 
-- `gn_list_trees` / `gn_inspect_tree`
-- `gn_ensure_modifier`
-- `gn_set_input`
-- `gn_apply_recipe_tree` (templates versionnés)
+- `gn_list_templates` — catalogue versionné
+- `gn_run_template` — construit un setup pro (`scatter_poisson`, `terrain_displace`, `facade_extrude`, `curve_railing`)
+
+Bibliothèque image : `docker/blender-canvas/gn_lib/` (injectée aussi dans `execute_python` comme `gn_lib`).
+
+Pour un résultat complexe : **préférer `gn_run_template`** puis ajuster params ; n’improviser un arbre à la main que si aucun template ne convient.
+
+Recipe vitrine : `gn_pro_showcase`.
 
 Voir `expertise/integrations/geometry_nodes.md`.
 
