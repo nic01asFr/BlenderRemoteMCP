@@ -53,7 +53,17 @@ L’agent doit appeler `get_canvas_url` (ou `blender_desktop_ui` si MCP Apps) et
 | 37 outils MCP | objets, collections, matériaux, éclairage, caméra, rendu, Python `bpy` |
 | Canvas noVNC | GUI Blender live dans le navigateur |
 | MCP Apps | resource `ui://blenderremotemcp/desktop` + outil `blender_desktop_ui` |
-| Auth | Bearer API key (`blender_…`), cookie, `?token=` |
+## Auth
+
+- **Bearer** : clé `blender_…` (register `/api/auth/register`)
+- **OAuth MCP** (Claude Desktop / connecteur distant) :
+  - `/.well-known/oauth-protected-resource`
+  - `/.well-known/oauth-authorization-server`
+  - `/authorize` (saisie de la clé) → `/oauth/token` (PKCE)
+  - DCR : `POST /oauth/register`
+
+Sur `401` `/mcp`, le serveur renvoie `WWW-Authenticate` avec `resource_metadata`.
+
 | Modes | multi-user (Docker) ou mono (pod Onyxia / all-in-one) |
 
 ## Déploiement SSPCloud / Onyxia

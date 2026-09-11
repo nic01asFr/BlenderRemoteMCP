@@ -45,6 +45,7 @@ import websockets
 from src.container_manager import ContainerManager
 from src.auth import (AuthManager, UserCreate, UserLogin, TokenResponse,
                       SCOPED_PREFIX, TOUS_LES_OUTILS)
+from src import oauth_mcp
 
 # Configuration
 logging.basicConfig(level=logging.INFO)
@@ -1534,6 +1535,14 @@ def _public_base_url(request: Request = None, base_url: str = "") -> str:
     return "http://localhost:8100"
 
 
+oauth_mcp.mount_oauth(
+    app,
+    auth_manager=auth_manager,
+    public_base_url=_public_base_url,
+    templates=templates,
+)
+
+
 def _canvas_url(base_url: str, api_key: str, *, embed: bool = False) -> str:
     """URL canonique du bureau immersif (/desktop). /canvas reste un alias HTTP."""
     base = (base_url or "http://localhost:8100").rstrip("/")
@@ -1956,10 +1965,15 @@ async def handle_mcp_request(body: dict, user_id: str, session_id: str = "",
 # MCP ENDPOINT
 # =============================================================================
 
-def _erreur_auth(message: str) -> JSONResponse:
+def _erreur_auth(message: str, request: Request = None) -> JSONResponse:
+    headers = None
+    if request is not None:
+        base = _public_base_url(request)
+        headers = {"WWW-Authenticate": oauth_mcp.www_authenticate_header(base)}
     return JSONResponse(
         status_code=401,
         content={"jsonrpc": "2.0", "error": {"code": -32000, "message": message}, "id": None},
+        headers=headers,
     )
 
 
@@ -2027,7 +2041,7 @@ async def mcp_handler(request: Request):
             "protocolVersion": PROTOCOL_VERSION,
             "supportedProtocolVersions": list(SUPPORTED_PROTOCOL_VERSIONS),
             "transport": "streamable-http",
-            "authentication": "Bearer token dans l'en-tete Authorization",
+            "authentication": "Bearer API key ou OAuth MCP (découverte /.well-known/)",
             "sessionsActives": len(_sessions),
         }
 
@@ -2036,7 +2050,8 @@ async def mcp_handler(request: Request):
     user, portee = await _resoudre_cle(jeton)
     if user is None:
         return _erreur_auth(
-            "Authentification requise : en-tete 'Authorization: Bearer VOTRE_CLE'."
+            "Authentification requise : Bearer blender_… ou flux OAuth MCP.",
+            request,
         )
 
     # ── GET avec SSE : transport historique ──────────────────────────────

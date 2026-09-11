@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Autoriser — BlenderRemoteMCP</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg0: #0c0e12;
+      --bg1: #141821;
+      --line: #2a3142;
+      --text: #eef1f6;
+      --muted: #9aa3b5;
+      --accent: #ff6b35;
+      --danger: #ff6b6b;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: "IBM Plex Sans", system-ui, sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(900px 500px at 10% -10%, rgba(255,107,53,.14), transparent 55%),
+        linear-gradient(180deg, var(--bg0), var(--bg1));
+      padding: 24px;
+    }
+    main {
+      width: 100%;
+      max-width: 28rem;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: rgba(0,0,0,.28);
+      padding: 28px 24px;
+    }
+    h1 { font-size: 1.35rem; font-weight: 600; margin-bottom: 8px; }
+    h1 span { color: var(--accent); }
+    p { color: var(--muted); font-size: 0.95rem; line-height: 1.5; margin-bottom: 18px; }
+    label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 6px; }
+    input {
+      width: 100%;
+      padding: 12px 14px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: #0a0b0f;
+      color: var(--text);
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.9rem;
+      margin-bottom: 16px;
+    }
+    input:focus { outline: none; border-color: var(--accent); }
+    button {
+      width: 100%;
+      padding: 12px 16px;
+      border: none;
+      border-radius: 8px;
+      background: var(--accent);
+      color: #111;
+      font-weight: 600;
+      font-size: 0.95rem;
+      cursor: pointer;
+    }
+    button:hover { filter: brightness(1.05); }
+    .alert {
+      background: rgba(255,107,107,.12);
+      border: 1px solid rgba(255,107,107,.35);
+      color: #ffc9c9;
+      padding: 10px 12px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      margin-bottom: 14px;
+    }
+    .alert code { font-family: "IBM Plex Mono", monospace; color: #fff; }
+    footer { margin-top: 16px; font-size: 0.75rem; color: var(--muted); }
+    footer a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Autoriser Blender<span>Remote</span>MCP</h1>
+    <p>Colle ta clé API pour connecter Claude Desktop, Cursor ou un client MCP distant au bureau Blender.</p>
+    {% if error == "invalid_key" %}
+    <div class="alert">Clé refusée. Elle commence par <code>blender_</code> — vérifie la copie depuis l’enregistrement ou Mes services.</div>
+    {% endif %}
+    <form method="post" action="/authorize/confirm?{{ confirm_query }}">
+      <label for="api_key">Clé d’accès</label>
+      <input id="api_key" name="api_key" type="password" required
+             placeholder="blender_…" autocomplete="off" autofocus>
+      <button type="submit">Autoriser</button>
+    </form>
+    <footer>
+      Service <a href="{{ public_base }}/">{{ public_base }}</a>
+    </footer>
+  </main>
+</body>
+</html>
