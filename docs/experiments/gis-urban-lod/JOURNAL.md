@@ -38,9 +38,24 @@ Format d’entrée :
   3. Recipe `gis_lod1_blocks` + mats façade/toiture
   4. Remplacer fixture par extrait BD TOPO zone pilote
 
-## 2026-09-11 — Smoke LOD1 baseline (script + Chrome)
+## 2026-09-11 — Recadrage « professionnel » + approches
 
-- **Objectif :** valider fixture → extrusion hauteurs → mats → vue bureau.
+- **Objectif :** ne plus confondre smoke technique et livrable métier.
+- **Constat user :** une maquette depuis référentiels doit être bien au-dessus
+  des boîtes extrudées synthétiques (état de l’art).
+- **Capitalisé :** `APPROACHES.md` — options A prétraitement externe (reco),
+  B BlenderGIS (profil desktop optionnel), C tout-GN (assemblage seul),
+  D CityJSON amont.
+- **Décision proposée :** pipeline **prepare GIS → /projects → Blender** ;
+  BlenderGIS non colonne vertébrale agent ; QGIS/GDAL pour la geo.
+- **Suite :** figer contrat `meta.json` + job prepare ; zone pilote réelle.
+
+---
+
+## 2026-09-11 — Smoke LOD1 baseline (script + Chrome) — NON LIVRABLE
+
+- **Statut :** validation de pont uniquement (fixture → extrude → mats).
+- **Ne pas** présenter comme maquette professionnelle.
 - **Données :** `fixtures/blocks_lod1.geojson` (5 bâtiments, embedded in MCP call).
 - **Procédure :**
   1. `clear_scene` + `setup_studio_lighting`

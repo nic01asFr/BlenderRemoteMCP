@@ -60,6 +60,16 @@ Essais locaux en **métrique locale** (déjà projeté) pour éviter proj dans B
 - Scene digest / counts dans `result`
 - Reproductible depuis fixture git
 
-## Lien expériences
+## Approches (comment s’y prendre)
 
-Toute validation passe par `docs/experiments/gis-urban-lod/` avant promotion.
+Voir `docs/experiments/gis-urban-lod/APPROACHES.md`.
+
+**Recommandation :** préparation géospatiale **externe** (GDAL/QGIS/job) →
+assets dans `/projects` → BlenderRemoteMCP (import + GN + mats + desktop).  
+**BlenderGIS** : profil desktop optionnel, pas le cœur agent.  
+Le smoke bmesh fixture = non-livrable.
+
+## Critère de succès professionnel
+
+Zone pilote **réelle** : relief crédible, hauteurs/emprises référentielles,
+shading utilisable en revue expert — pas seulement des cubes synthétiques.
