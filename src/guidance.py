@@ -173,7 +173,7 @@ def build_context(phase: str = "model", *, extra: Optional[Dict[str, Any]] = Non
     hints = {
         "setup": "Prefere clear_and_studio ou initialize_scene ; lis skill://bpy-pitfalls.",
         "model": "Organise en collections ; skill://modelling ; GN -> skill://geometry-nodes / recipes gn_*.",
-        "shade": "Lis skill://materials avant d'empiler des nodes.",
+        "shade": "mat_apply_preset / skill://materials ; evite d'improviser le Principled a la main.",
         "light": "setup_studio_lighting puis skill://lighting.",
         "render": "detect_gpu / configure_render ; skill://camera-render ; screenshot puis canvas.",
         "review": "get_screenshot + get_canvas_url pour l'utilisateur.",

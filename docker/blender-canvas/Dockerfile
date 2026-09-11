@@ -71,6 +71,7 @@ COPY stream_server.py /app/
 COPY blender_addon.py /app/
 COPY startup.py /app/
 COPY gn_lib/ /app/gn_lib/
+COPY mat_lib/ /app/mat_lib/
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY entrypoint.sh /app/
 

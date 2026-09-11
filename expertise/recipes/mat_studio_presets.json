@@ -1,0 +1,75 @@
+{
+  "id": "mat_studio_presets",
+  "name": "Materials — presets studio",
+  "description": "Scène studio + 6 sphères, une par preset mat_lib. Lis skill://materials.",
+  "tags": ["materials", "studio", "presets", "natif"],
+  "parameters": {},
+  "steps": [
+    {
+      "id": "clear",
+      "tool": "clear_scene",
+      "params": {},
+      "description": "Scène propre"
+    },
+    {
+      "id": "studio",
+      "tool": "setup_studio_lighting",
+      "params": {},
+      "description": "Éclairage"
+    },
+    {
+      "id": "camera",
+      "tool": "setup_camera",
+      "params": {},
+      "description": "Caméra"
+    },
+    {
+      "id": "spheres",
+      "tool": "execute_python",
+      "description": "Créer 6 sphères en rangée",
+      "code": "import bpy\nnames = ['MATBALL_Concrete','MATBALL_Metal','MATBALL_Glass','MATBALL_Plastic','MATBALL_Grass','MATBALL_Rubber']\nfor n in list(names):\n    if n in bpy.data.objects:\n        bpy.data.objects.remove(bpy.data.objects[n], do_unlink=True)\nfor i, n in enumerate(names):\n    bpy.ops.mesh.primitive_uv_sphere_add(radius=0.45, location=(i * 1.2 - 3.0, 0.0, 0.45), segments=32, ring_count=16)\n    obj = bpy.context.active_object\n    obj.name = n\n    bpy.ops.object.shade_smooth()\nresult = {'ok': True, 'objects': names}\n"
+    },
+    {
+      "id": "concrete",
+      "tool": "mat_apply_preset",
+      "params": {"preset_id": "concrete", "object_name": "MATBALL_Concrete"},
+      "description": "Concrete"
+    },
+    {
+      "id": "metal",
+      "tool": "mat_apply_preset",
+      "params": {"preset_id": "brushed_metal", "object_name": "MATBALL_Metal"},
+      "description": "Metal"
+    },
+    {
+      "id": "glass",
+      "tool": "mat_apply_preset",
+      "params": {"preset_id": "glass_clear", "object_name": "MATBALL_Glass"},
+      "description": "Glass"
+    },
+    {
+      "id": "plastic",
+      "tool": "mat_apply_preset",
+      "params": {"preset_id": "plastic_soft", "object_name": "MATBALL_Plastic"},
+      "description": "Plastic"
+    },
+    {
+      "id": "grass",
+      "tool": "mat_apply_preset",
+      "params": {"preset_id": "terrain_grass", "object_name": "MATBALL_Grass"},
+      "description": "Grass"
+    },
+    {
+      "id": "rubber",
+      "tool": "mat_apply_preset",
+      "params": {"preset_id": "rubber_matte", "object_name": "MATBALL_Rubber"},
+      "description": "Rubber"
+    },
+    {
+      "id": "shot",
+      "tool": "get_screenshot",
+      "params": {},
+      "description": "Contrôle visuel"
+    }
+  ]
+}

@@ -66,5 +66,25 @@
         }
       }
     ]
+  },
+  {
+    "name": "materials_presets",
+    "description": "Appliquer des matériaux professionnels via mat_lib.",
+    "arguments": [
+      {
+        "name": "intent",
+        "description": "studio balls, terrain+grass, produit plastique/métal…",
+        "required": false
+      }
+    ],
+    "messages": [
+      {
+        "role": "user",
+        "content": {
+          "type": "text",
+          "text": "Objectif matériaux : {{intent}}. Lis skill://materials. Préfère mat_list_presets puis mat_apply_preset (ou recipe mat_studio_presets). Couleurs RGBA 0–1. Transmission Weight pour le verre. Screenshot + get_canvas_url."
+        }
+      }
+    ]
   }
 ]

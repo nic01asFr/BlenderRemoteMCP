@@ -192,7 +192,7 @@ def test_deux_sessions_coexistent_pour_un_meme_utilisateur(client, cle):
         r = client.post("/mcp", headers=_entetes(cle, sid),
                         json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
         assert r.status_code == 200
-        assert len(r.json()["result"]["tools"]) == 43
+        assert len(r.json()["result"]["tools"]) == 45
 
 
 def test_session_inconnue_refusee_mais_absence_toleree(client, cle):

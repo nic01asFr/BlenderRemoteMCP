@@ -333,6 +333,12 @@ class BlenderAPIHandler:
             namespace["gn_lib"] = gn_lib
         except Exception:
             pass
+        try:
+            import mat_lib  # type: ignore
+
+            namespace["mat_lib"] = mat_lib
+        except Exception:
+            pass
 
         try:
             exec(code, namespace)
