@@ -432,13 +432,13 @@ async def mcp_execute_python(user_id: str, code: str) -> str:
 
 async def mcp_gn_list_templates(user_id: str) -> str:
     """List Geometry Nodes templates available in gn_lib (inside Blender)."""
-        code = (
-            "import sys\n"
-            "if '/app' not in sys.path:\n"
-            "    sys.path.insert(0, '/app')\n"
-            "import gn_lib\n"
-            "result = gn_lib.list_templates()\n"
-        )
+    code = (
+        "import sys\n"
+        "if '/app' not in sys.path:\n"
+        "    sys.path.insert(0, '/app')\n"
+        "import gn_lib\n"
+        "result = gn_lib.list_templates()\n"
+    )
     try:
         result = await _call_blender(user_id, "/api/execute", "POST", {"code": code})
         if result.get("success"):
