@@ -33,6 +33,12 @@ summary: Assigner et régler des matériaux sans pivoter à tâtons.
 ## Personas (L5) et métier (L4)
 
 - Personas : voir `agents/README.md` — ne pas les injecter dans `initialize`.
-- Métier (BIM, route, mesh) : voir `integrations/` — compose le runtime, ne le pollue pas.
+- Métier (BIM, route, mesh, **GIS urbain LOD**) : voir `integrations/` — compose le runtime, ne le pollue pas.
 - Profil **natif** Geometry Nodes : `skill://geometry-nodes`, recipes `gn_*`, contrat `integrations/geometry_nodes.md`.
 - Profil **natif** Materials : `skill://materials`, `mat_lib`, tools `mat_*`, contrat `integrations/materials.md`.
+- Profil **métier** GIS : `skill://gis-blender`, track `docs/experiments/gis-urban-lod/` (essais → specs).
+
+## Expériences
+
+Les essais structurés vivent sous `docs/experiments/` et se **promouvoient**
+vers skills / recipes / `gn_lib` / `mat_lib` / specs (voir checklist du README).

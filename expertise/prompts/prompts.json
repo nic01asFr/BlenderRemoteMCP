@@ -86,5 +86,25 @@
         }
       }
     ]
+  },
+  {
+    "name": "gis_maquette_lod",
+    "description": "Amorcer une maquette urbaine LOD1 depuis données référentielles / fixture.",
+    "arguments": [
+      {
+        "name": "zone",
+        "description": "Nom de zone ou 'fixture' pour blocks_lod1.geojson",
+        "required": false
+      }
+    ],
+    "messages": [
+      {
+        "role": "user",
+        "content": {
+          "type": "text",
+          "text": "Maquette urbaine (esprit LOD1/2) pour {{zone}}. Lis skill://gis-blender et le track docs/experiments/gis-urban-lod/ (JOURNAL + fixtures). Utilise GN + mat_apply_preset ; ne vise pas LOD3. Documente tout écart dans le JOURNAL du track. Screenshot + get_canvas_url pour validation expert."
+        }
+      }
+    ]
   }
 ]

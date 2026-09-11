@@ -45,6 +45,7 @@ def test_catalog_charge_expertise():
     cat = GuidanceCatalog()
     assert "bpy-pitfalls" in cat.skills
     assert "geometry-nodes" in cat.skills
+    assert "gis-blender" in cat.skills
     assert "clear_and_studio" in cat.recipes
     assert "gn_scatter_instances" in cat.recipes
     assert "gn_curve_to_mesh_pipe" in cat.recipes
