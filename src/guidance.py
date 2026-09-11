@@ -145,9 +145,22 @@ class GuidanceCatalog:
 
 
 def substitute_params(value: Any, params: Dict[str, Any]) -> Any:
-    if isinstance(value, str) and value.startswith("$"):
-        key = value[1:]
-        return params.get(key, value)
+    """Remplace ``$key`` (valeur entière) et ``{{key}}`` (dans une longue chaîne).
+
+    Pour ``{{key}}``, on utilise ``repr(v)`` afin d'injecter proprement dans
+    du ``execute_python`` (nombres, chaînes, listes).
+    """
+    if isinstance(value, str):
+        if value.startswith("$") and len(value) > 1 and "{{" not in value:
+            key = value[1:]
+            if key in params:
+                return params[key]
+        if params and "{{" in value:
+            out = value
+            for key, raw in params.items():
+                out = out.replace("{{" + key + "}}", repr(raw))
+            return out
+        return value
     if isinstance(value, dict):
         return {k: substitute_params(v, params) for k, v in value.items()}
     if isinstance(value, list):
@@ -159,7 +172,7 @@ def build_context(phase: str = "model", *, extra: Optional[Dict[str, Any]] = Non
     """Contexte léger joint aux réponses (patron BigQgisMCP / BigLocalApps)."""
     hints = {
         "setup": "Prefere clear_and_studio ou initialize_scene ; lis skill://bpy-pitfalls.",
-        "model": "Organise en collections ; skill://modelling avant execute_python complexe.",
+        "model": "Organise en collections ; skill://modelling ; GN -> skill://geometry-nodes / recipes gn_*.",
         "shade": "Lis skill://materials avant d'empiler des nodes.",
         "light": "setup_studio_lighting puis skill://lighting.",
         "render": "detect_gpu / configure_render ; skill://camera-render ; screenshot puis canvas.",

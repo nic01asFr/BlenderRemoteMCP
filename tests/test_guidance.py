@@ -44,14 +44,22 @@ def _mcp(client, cle, method, params=None, sid=None):
 def test_catalog_charge_expertise():
     cat = GuidanceCatalog()
     assert "bpy-pitfalls" in cat.skills
+    assert "geometry-nodes" in cat.skills
     assert "clear_and_studio" in cat.recipes
+    assert "gn_scatter_instances" in cat.recipes
+    assert "gn_curve_to_mesh_pipe" in cat.recipes
     assert any(p["name"] == "demarrer_studio" for p in cat.prompts)
+    assert any(p["name"] == "geometry_nodes" for p in cat.prompts)
 
 
 def test_substitute_params():
     assert substitute_params({"type": "$object_type"}, {"object_type": "CUBE"}) == {
         "type": "CUBE"
     }
+    code = "DENSITY = {{density}}\nNAME = {{label}}"
+    out = substitute_params(code, {"density": 6.0, "label": "GN"})
+    assert "DENSITY = 6.0" in out
+    assert 'NAME = \'GN\'' in out or 'NAME = "GN"' in out
 
 
 def test_build_context_hint():
@@ -81,12 +89,13 @@ def test_resources_incluent_skills(client, cle):
     r = _mcp(client, cle, "resources/list", {}, sid=sid)
     uris = [x["uri"] for x in r.json()["result"]["resources"]]
     assert "skill://bpy-pitfalls" in uris
+    assert "skill://geometry-nodes" in uris
     read = _mcp(
         client, cle, "resources/read",
-        {"uri": "skill://bpy-pitfalls"}, sid=sid,
+        {"uri": "skill://geometry-nodes"}, sid=sid,
     )
     text = read.json()["result"]["contents"][0]["text"]
-    assert "execute_python" in text or "bpy" in text
+    assert "NodeTreeInterface" in text or "interface.new_socket" in text
 
 
 def test_prompts_list_et_get(client, cle):

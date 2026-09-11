@@ -14,3 +14,4 @@ summary: Éviter les erreurs classiques (contexte, unités, thread, résultats).
 - **Rendu CPU** : sur SSPCloud sans GPU, `configure_render` → Cycles CPU + denoising.
 - **GUI** : après des changements importants, `get_screenshot` puis `get_canvas_url` pour l’humain.
 - **Ne pas** réinventer l’éclairage : `setup_studio_lighting` + skill `lighting` / recipe `studio_product`.
+- **Geometry Nodes** : interface via `ng.interface.new_socket` (pas `ng.inputs.new`) ; `ng.is_modifier = True` ; voir `skill://geometry-nodes` et recipes `gn_*`.

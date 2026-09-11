@@ -1,0 +1,37 @@
+{
+  "id": "gn_scatter_instances",
+  "name": "GN — scatter instances sur grille",
+  "description": "Crée un Geometry Node Tree (MeshGrid → Distribute RANDOM → Instance IcoSphere → Realize), l’assigne à GN_Host, règle Density / Instance Scale. Validé Blender 4.0.2. Lis skill://geometry-nodes.",
+  "tags": ["geometry-nodes", "scatter", "instances", "natif"],
+  "parameters": {
+    "density": {
+      "type": "number",
+      "default": 6.0,
+      "description": "Densité (DistributePointsOnFaces, mode RANDOM)"
+    },
+    "instance_scale": {
+      "type": "number",
+      "default": 0.1,
+      "description": "Échelle uniforme des instances"
+    },
+    "grid_size": {
+      "type": "number",
+      "default": 4.0,
+      "description": "Taille X/Y de la MeshGrid"
+    }
+  },
+  "steps": [
+    {
+      "id": "build",
+      "tool": "execute_python",
+      "description": "Construire l’arbre GN + modifier",
+      "code": "import bpy\n\nDENSITY = {{density}}\nINSTANCE_SCALE = {{instance_scale}}\nGRID_SIZE = {{grid_size}}\n\ndef build(name='GN_ScatterDemo'):\n    if name in bpy.data.node_groups:\n        bpy.data.node_groups.remove(bpy.data.node_groups[name])\n    ng = bpy.data.node_groups.new(name, 'GeometryNodeTree')\n    ng.is_modifier = True\n    nodes, links = ng.nodes, ng.links\n    nodes.clear()\n    s_d = ng.interface.new_socket(name='Density', in_out='INPUT', socket_type='NodeSocketFloat')\n    s_d.default_value = float(DENSITY)\n    s_s = ng.interface.new_socket(name='Instance Scale', in_out='INPUT', socket_type='NodeSocketFloat')\n    s_s.default_value = float(INSTANCE_SCALE)\n    ng.interface.new_socket(name='Geometry', in_out='INPUT', socket_type='NodeSocketGeometry')\n    ng.interface.new_socket(name='Geometry', in_out='OUTPUT', socket_type='NodeSocketGeometry')\n    n_in = nodes.new('NodeGroupInput'); n_in.location = (-700, 0)\n    n_out = nodes.new('NodeGroupOutput'); n_out.location = (500, 0)\n    grid = nodes.new('GeometryNodeMeshGrid'); grid.location = (-450, 150)\n    grid.inputs['Size X'].default_value = float(GRID_SIZE)\n    grid.inputs['Size Y'].default_value = float(GRID_SIZE)\n    grid.inputs['Vertices X'].default_value = 24\n    grid.inputs['Vertices Y'].default_value = 24\n    dist = nodes.new('GeometryNodeDistributePointsOnFaces'); dist.location = (-200, 0)\n    dist.distribute_method = 'RANDOM'\n    ico = nodes.new('GeometryNodeMeshIcoSphere'); ico.location = (-200, -220)\n    ico.inputs['Radius'].default_value = 1.0\n    ico.inputs['Subdivisions'].default_value = 1\n    iop = nodes.new('GeometryNodeInstanceOnPoints'); iop.location = (50, 0)\n    scale_v = nodes.new('ShaderNodeCombineXYZ'); scale_v.location = (-50, -200)\n    realize = nodes.new('GeometryNodeRealizeInstances'); realize.location = (280, 0)\n    links.new(grid.outputs['Mesh'], dist.inputs['Mesh'])\n    links.new(n_in.outputs['Density'], dist.inputs['Density'])\n    links.new(dist.outputs['Points'], iop.inputs['Points'])\n    links.new(ico.outputs['Mesh'], iop.inputs['Instance'])\n    links.new(n_in.outputs['Instance Scale'], scale_v.inputs['X'])\n    links.new(n_in.outputs['Instance Scale'], scale_v.inputs['Y'])\n    links.new(n_in.outputs['Instance Scale'], scale_v.inputs['Z'])\n    links.new(scale_v.outputs['Vector'], iop.inputs['Scale'])\n    links.new(iop.outputs['Instances'], realize.inputs['Geometry'])\n    links.new(realize.outputs['Geometry'], n_out.inputs['Geometry'])\n    return ng\n\nng = build()\nif 'GN_Host' in bpy.data.objects:\n    obj = bpy.data.objects['GN_Host']\nelse:\n    bpy.ops.mesh.primitive_plane_add(size=1, location=(0, 0, 0))\n    obj = bpy.context.active_object\n    obj.name = 'GN_Host'\nmod = next((m for m in obj.modifiers if m.type == 'NODES'), None)\nif mod is None:\n    mod = obj.modifiers.new('GeometryNodes', 'NODES')\nmod.node_group = ng\nfor item in ng.interface.items_tree:\n    if getattr(item, 'in_out', None) != 'INPUT' or not hasattr(item, 'identifier'):\n        continue\n    if item.socket_type == 'NodeSocketGeometry':\n        continue\n    if item.name == 'Density':\n        mod[item.identifier] = float(DENSITY)\n    elif item.name == 'Instance Scale':\n        mod[item.identifier] = float(INSTANCE_SCALE)\nbpy.context.view_layer.update()\neval_obj = obj.evaluated_get(bpy.context.evaluated_depsgraph_get())\nresult = {\n    'ok': True,\n    'object': obj.name,\n    'tree': ng.name,\n    'evaluated_verts': len(eval_obj.data.vertices),\n    'evaluated_polygons': len(eval_obj.data.polygons),\n}\n"
+    },
+    {
+      "id": "shot",
+      "tool": "get_screenshot",
+      "params": {},
+      "description": "Vérifier le viewport"
+    }
+  ]
+}

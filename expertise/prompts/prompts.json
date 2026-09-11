@@ -46,5 +46,25 @@
         }
       }
     ]
+  },
+  {
+    "name": "geometry_nodes",
+    "description": "Construire ou modifier un setup Geometry Nodes de façon fiable (profil natif).",
+    "arguments": [
+      {
+        "name": "intent",
+        "description": "scatter, pipe/tube, grille paramétrique, autre…",
+        "required": false
+      }
+    ],
+    "messages": [
+      {
+        "role": "user",
+        "content": {
+          "type": "text",
+          "text": "Objectif Geometry Nodes : {{intent}}. Lis skill://geometry-nodes (interface 4.0, RANDOM vs POISSON, RealizeInstances). Préfère run_recipe gn_scatter_instances ou gn_curve_to_mesh_pipe si ça matche. Sinon execute_python court avec result= dict (verts évalués). Puis get_screenshot et get_canvas_url. N'édite pas l'arbre via clics GUI."
+        }
+      }
+    ]
   }
 ]

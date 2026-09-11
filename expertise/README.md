@@ -34,3 +34,4 @@ summary: Assigner et régler des matériaux sans pivoter à tâtons.
 
 - Personas : voir `agents/README.md` — ne pas les injecter dans `initialize`.
 - Métier (BIM, route, mesh) : voir `integrations/` — compose le runtime, ne le pollue pas.
+- Profil **natif** Geometry Nodes : `skill://geometry-nodes`, recipes `gn_*`, contrat `integrations/geometry_nodes.md`.

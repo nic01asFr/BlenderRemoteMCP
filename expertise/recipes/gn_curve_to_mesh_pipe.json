@@ -1,0 +1,32 @@
+{
+  "id": "gn_curve_to_mesh_pipe",
+  "name": "GN — courbe → tube (Curve to Mesh)",
+  "description": "Arbre GN : CurveLine + cercle profil → CurveToMesh → sortie. Paramétrique (longueur, rayon). Validé patterns Blender 4.0 interface API.",
+  "tags": ["geometry-nodes", "curve", "mesh", "natif"],
+  "parameters": {
+    "length": {
+      "type": "number",
+      "default": 4.0,
+      "description": "Longueur de la courbe (axe X)"
+    },
+    "profile_radius": {
+      "type": "number",
+      "default": 0.15,
+      "description": "Rayon du profil circulaire"
+    }
+  },
+  "steps": [
+    {
+      "id": "build",
+      "tool": "execute_python",
+      "description": "Construire CurveLine → CurveToMesh",
+      "code": "import bpy\n\nLENGTH = {{length}}\nRADIUS = {{profile_radius}}\n\ndef build(name='GN_PipeDemo'):\n    if name in bpy.data.node_groups:\n        bpy.data.node_groups.remove(bpy.data.node_groups[name])\n    ng = bpy.data.node_groups.new(name, 'GeometryNodeTree')\n    ng.is_modifier = True\n    nodes, links = ng.nodes, ng.links\n    nodes.clear()\n    s_len = ng.interface.new_socket(name='Length', in_out='INPUT', socket_type='NodeSocketFloat')\n    s_len.default_value = float(LENGTH)\n    s_rad = ng.interface.new_socket(name='Radius', in_out='INPUT', socket_type='NodeSocketFloat')\n    s_rad.default_value = float(RADIUS)\n    ng.interface.new_socket(name='Geometry', in_out='INPUT', socket_type='NodeSocketGeometry')\n    ng.interface.new_socket(name='Geometry', in_out='OUTPUT', socket_type='NodeSocketGeometry')\n    n_in = nodes.new('NodeGroupInput'); n_in.location = (-700, 0)\n    n_out = nodes.new('NodeGroupOutput'); n_out.location = (400, 0)\n    line = nodes.new('GeometryNodeCurvePrimitiveLine'); line.location = (-400, 80)\n    line.mode = 'POINTS'\n    comb = nodes.new('ShaderNodeCombineXYZ'); comb.location = (-550, 80)\n    links.new(n_in.outputs['Length'], comb.inputs['X'])\n    links.new(comb.outputs['Vector'], line.inputs['End'])\n    circle = nodes.new('GeometryNodeCurvePrimitiveCircle'); circle.location = (-400, -160)\n    circle.mode = 'RADIUS'\n    links.new(n_in.outputs['Radius'], circle.inputs['Radius'])\n    c2m = nodes.new('GeometryNodeCurveToMesh'); c2m.location = (0, 0)\n    c2m.inputs['Fill Caps'].default_value = True\n    links.new(line.outputs['Curve'], c2m.inputs['Curve'])\n    links.new(circle.outputs['Curve'], c2m.inputs['Profile Curve'])\n    links.new(c2m.outputs['Mesh'], n_out.inputs['Geometry'])\n    return ng\n\nng = build()\nif 'GN_Pipe' in bpy.data.objects:\n    obj = bpy.data.objects['GN_Pipe']\nelse:\n    bpy.ops.mesh.primitive_plane_add(size=0.1, location=(0, 0, 0.5))\n    obj = bpy.context.active_object\n    obj.name = 'GN_Pipe'\nmod = next((m for m in obj.modifiers if m.type == 'NODES'), None)\nif mod is None:\n    mod = obj.modifiers.new('GeometryNodes', 'NODES')\nmod.node_group = ng\nfor item in ng.interface.items_tree:\n    if getattr(item, 'in_out', None) != 'INPUT' or not hasattr(item, 'identifier'):\n        continue\n    if item.socket_type == 'NodeSocketGeometry':\n        continue\n    if item.name == 'Length':\n        mod[item.identifier] = float(LENGTH)\n    elif item.name == 'Radius':\n        mod[item.identifier] = float(RADIUS)\nbpy.context.view_layer.update()\neval_obj = obj.evaluated_get(bpy.context.evaluated_depsgraph_get())\nresult = {\n    'ok': True,\n    'object': obj.name,\n    'tree': ng.name,\n    'evaluated_verts': len(eval_obj.data.vertices),\n    'evaluated_polygons': len(eval_obj.data.polygons),\n}\n"
+    },
+    {
+      "id": "shot",
+      "tool": "get_screenshot",
+      "params": {},
+      "description": "Vérifier le viewport"
+    }
+  ]
+}
