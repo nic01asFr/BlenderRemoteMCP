@@ -11,11 +11,13 @@ dans le produit.
 | Contrat intégration | Fait | `expertise/integrations/gis_urban_lod.md` |
 | Skill amorce | Fait | `expertise/skills/gis-blender.md` |
 | Fixture GeoJSON LOD1 | Fait | `fixtures/blocks_lod1.geojson` |
-| Parse attributs GeoJSON (test unitaire) | À faire | `tests/test_gis_fixtures.py` |
-| Template `gn_lib.urban_lod1_extrude` | À faire | `docker/blender-canvas/gn_lib/` |
+| Parse attributs GeoJSON (test unitaire) | Fait | `tests/test_gis_fixtures.py` |
+| Smoke Blender baseline bmesh + mats | **Fait 2026-09-11** | `scripts/lod1_extrude_baseline.py` ; heights_match=True ; Chrome OK |
+| Template `gn_lib.urban_lod1_extrude` | À faire | `docker/blender-canvas/gn_lib/` — promouvoir depuis baseline |
 | Recipe `gis_lod1_blocks` | À faire | `expertise/recipes/` |
 | Tools MCP `gis_*` (optionnel) | Différé | seulement si recipes insuffisantes |
 | Import BD TOPO réel | Différé | volume `/projects`, hors git si licence |
+| LOD2 toiture `gable` | À faire | après template LOD1 |
 
 ## Règle
 

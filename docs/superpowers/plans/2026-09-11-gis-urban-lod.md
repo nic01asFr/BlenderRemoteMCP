@@ -25,8 +25,8 @@ expertise `gis-blender` guide l’agent.
 - [x] Journal + PROMOTE
 
 ### Task 2 — Smoke Blender (prochaine)
-- [ ] Script execute_python : lire fixture, créer meshes extrudés (baseline sans GN)
-- [ ] Journaliser métriques
+- [x] Script execute_python : lire fixture, créer meshes extrudés (baseline sans GN)
+- [x] Journaliser métriques + validation Chrome
 - [ ] Comparer à une version GN dès que template prêt
 
 ### Task 3 — Promotion gn_lib

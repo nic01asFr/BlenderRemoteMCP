@@ -38,13 +38,28 @@ Format d’entrée :
   3. Recipe `gis_lod1_blocks` + mats façade/toiture
   4. Remplacer fixture par extrait BD TOPO zone pilote
 
-## 2026-09-11 — Socle opérateur déjà disponible (ne pas réinventer)
+## 2026-09-11 — Smoke LOD1 baseline (script + Chrome)
 
-État du service au moment du cadrage (branches materials/GN) :
-
-- `gn_run_template` : scatter_poisson, terrain_displace, facade_extrude, curve_railing
-- `mat_apply_preset` : concrete, brushed_metal, glass_clear, plastic_soft, terrain_grass, rubber_matte
-- Recipes : `gn_pro_showcase`, `mat_studio_presets`
-- Bureau : `/desktop` pour validation expert
-
-Ces briques sont le **socle** des essais LOD (réutiliser, ne pas forker).
+- **Objectif :** valider fixture → extrusion hauteurs → mats → vue bureau.
+- **Données :** `fixtures/blocks_lod1.geojson` (5 bâtiments, embedded in MCP call).
+- **Procédure :**
+  1. `clear_scene` + `setup_studio_lighting`
+  2. `execute_python` bmesh extrude + `mat_lib.apply` (mapping use→preset)
+  3. Caméra (85, -70, 55) lens 35 clip_end 500
+  4. Validation MCP `get_screenshot` + Chrome DevTools screenshot bureau
+- **Résultat (métriques) :**
+  - `buildings`: 5, `heights_match`: **True**
+  - B1 12.0m, B2 18.5m, B3 9.0m, B4 24.0m, B5 6.0m (bbox = attr)
+  - Presets : concrete / brushed_metal / concrete / concrete / plastic_soft + ground grass
+  - Chrome : sol vert + volumes colorés visibles (MATERIAL shading) ; outliner `LOD1_B*`
+  - MCP X11 screenshot plus « workbench » (gris) — moins fiable pour juger les mats
+- **Écarts / bugs :**
+  - `mat_apply_preset` pas encore dans le catalogue Cursor MCP discovery (ok via `mat_lib` in execute_python)
+  - get_screenshot ≠ fidelity materials du noVNC
+- **Capitalisé vers :**
+  - `scripts/lod1_extrude_baseline.py`
+  - PROMOTE.md (baseline prêt pour template GN)
+- **Suite :**
+  1. Promouvoir logique en `gn_lib.urban_lod1_extrude` (ou importer curves→mesh en GN)
+  2. Recipe `gis_lod1_blocks`
+  3. Toiture LOD2 lite pour `roof=gable`
